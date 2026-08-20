@@ -15,6 +15,7 @@ REASONS = {
     "tool_error":      "інструмент повернув помилку",
     "user_asked":      "клієнт попросив оператора",
     "no_tool_used":    "агент відповів без звернення до бекенду",
+    "budget_exceeded": "перевищено ліміт вартості обробки",
 }
 
 _ASK_HUMAN = ("оператор", "людин", "менеджер", "консультант", "зателефон", "подзвон")
@@ -33,6 +34,8 @@ def decide(result: dict, query: str = "") -> str | None:
         return "api_error"
     if ESCALATE_ON.get("turns_exhausted") and result.get("outcome") == "turns_exhausted":
         return "turns_exhausted"
+    if ESCALATE_ON.get("budget_exceeded") and result.get("outcome") == "budget_exceeded":
+        return "budget_exceeded"
     if ESCALATE_ON.get("guardrail_block") and \
             result.get("guardrail", {}).get("verdict") == "block":
         return "guardrail_block"

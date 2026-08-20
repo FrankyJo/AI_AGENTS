@@ -2,14 +2,15 @@
 Спільне ядро: клієнт API + agent loop.
 
 Цей файл не змінюється від модуля до модуля — змінюється те, ЩО в нього передають.
-Окрім щасливого шляху, тут явно обробляються чотири види збоїв:
-  api_error · tool_error · turns_exhausted · no_tool_used
+Окрім щасливого шляху, тут явно обробляються п'ять видів збоїв:
+  api_error · tool_error · turns_exhausted · no_tool_used · budget_exceeded
 """
 
 import json
 import time
 from anthropic import Anthropic, APIError, APIStatusError
-from config import API_KEY, MODEL, MODEL_FAST, MAX_TOKENS, MAX_TURNS
+from config import API_KEY, MODEL, MODEL_FAST, MAX_TOKENS, MAX_TURNS, MAX_COST_USD
+from core import cost
 
 client = Anthropic(api_key=API_KEY)
 
@@ -83,6 +84,7 @@ def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
 
     messages = [{"role": "user", "content": query}]
     trace, failures = [], []
+    spent_usd = 0.0
     started = time.time()
 
     for turn in range(MAX_TURNS):
@@ -108,6 +110,15 @@ def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
                     "elapsed_sec": round(time.time() - started, 2),
                     "usage": {"input_tokens": resp.usage.input_tokens,
                               "output_tokens": resp.usage.output_tokens}}
+
+        spent_usd += cost.usd({MODEL: {"calls": 1, "in": resp.usage.input_tokens,
+                                        "out": resp.usage.output_tokens}})
+        if spent_usd > MAX_COST_USD:                               # ← вичерпано бюджет
+            return {"answer": f"Досягнуто ліміту вартості обробки (${MAX_COST_USD:.2f}). "
+                              "Передаю звернення оператору.",
+                    "outcome": "budget_exceeded", "trace": trace, "failures": failures,
+                    "turns": turn + 1, "spent_usd": round(spent_usd, 6),
+                    "elapsed_sec": round(time.time() - started, 2), "usage": {}}
 
         results = []
         for tu in tool_uses:

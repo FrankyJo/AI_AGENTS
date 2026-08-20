@@ -104,9 +104,14 @@ def check_compensation(tracking: str) -> dict:
                     "після завершення розшуку."}
 
 
-def estimate_shipping_refund(days_in_transit: int, declared_delivery_days: int) -> dict:
+def estimate_shipping_refund(days_in_transit: int, declared_delivery_days: int, status: str) -> dict:
     """Оцінює право на повернення вартості доставки за кількістю днів прострочення.
-    Викликати ПІСЛЯ get_order_status — цифри беруться з його відповіді."""
+    Викликати ПІСЛЯ get_order_status — days_in_transit, declared_delivery_days і status
+    беруться з його відповіді."""
+    if status == "Повернення відправнику":
+        return {"eligible": False, "reason": "return_sender",
+                "rule": "Правило 4.7. Якщо відправлення повернуто через невірну адресу, "
+                        "вказану відправником, вартість доставки не повертається."}
     overdue = days_in_transit - declared_delivery_days
     if overdue < 5:
         return {"eligible": False, "overdue_days": max(overdue, 0),
@@ -165,15 +170,19 @@ TOOL_SCHEMAS = {
     "estimate_shipping_refund": _schema(
         "estimate_shipping_refund",
         "Оцінює право на повернення вартості доставки за кількістю днів прострочення. "
-        "Виклич СПОЧАТКУ get_order_status і передай сюди саме ті days_in_transit та "
-        "declared_delivery_days, що прийшли в його відповіді.",
+        "Виклич СПОЧАТКУ get_order_status і передай сюди саме ті days_in_transit, "
+        "declared_delivery_days та status, що прийшли в його відповіді. Якщо status "
+        "дорівнює 'Повернення відправнику' (невірна адреса — провина відправника), "
+        "право на повернення не залежить від кількості днів прострочення.",
         {"days_in_transit": {"type": "integer",
                               "description": "Скільки днів відправлення вже в дорозі "
                                               "(з відповіді get_order_status)"},
          "declared_delivery_days": {"type": "integer",
                                      "description": "Заявлений строк доставки в днях "
-                                                     "(з відповіді get_order_status)"}},
-        ["days_in_transit", "declared_delivery_days"]),
+                                                     "(з відповіді get_order_status)"},
+         "status": {"type": "string",
+                     "description": "Статус відправлення (з відповіді get_order_status)"}},
+        ["days_in_transit", "declared_delivery_days", "status"]),
     "check_refund_eligibility": _schema(
         "check_refund_eligibility",
         "Перевіряє право на повернення ВАРТОСТІ ДОСТАВКИ.", _TRACK, ["tracking"]),

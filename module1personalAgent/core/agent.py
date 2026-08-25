@@ -7,6 +7,7 @@
 no_tool_used · budget_exceeded.
 """
 
+import datetime
 import json
 import time
 from anthropic import Anthropic, APIError, APIStatusError
@@ -62,6 +63,10 @@ def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
       no_tool_used — модель відповіла, жодного разу не звернувшись до бекенду
     """
     from domain.backend import dispatch
+
+    # модель не знає поточної дати сама — без цього вона вгадує рік при
+    # log_workout/log_set і може записати тренування під неправильною датою
+    system = f"{system}\n\nСьогоднішня дата: {datetime.date.today().isoformat()}."
 
     messages = [{"role": "user", "content": query}]
     trace, failures = [], []

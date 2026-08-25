@@ -6,6 +6,7 @@ domain/backend.py лишається справжнім — він пише/чи
     python -m unittest tests.test_agent -v
 """
 
+import datetime
 import sys
 import pathlib
 import unittest
@@ -49,6 +50,16 @@ class TestAgentLoop(unittest.TestCase):
         profile = backend.update_profile(name="Денис")
         self.assertEqual(profile["name"], "Денис")
         self.assertEqual(backend.get_profile()["name"], "Денис")
+
+    def test_run_agent_injects_todays_date_into_system_prompt(self):
+        """Модель має знати, яке сьогодні число — інакше вгадує рік у log_workout/log_set."""
+        responses = [fake_resp([text_block("ok")], "end_turn")]
+        with patch.object(agent, "_call", side_effect=responses) as mock_call:
+            agent.run_agent(system="базовий промпт", tools=[], query="test")
+
+        sent_system = mock_call.call_args.kwargs["system"]
+        self.assertIn(datetime.date.today().isoformat(), sent_system)
+        self.assertIn("базовий промпт", sent_system)
 
     def test_ok_happy_path_logs_workout(self):
         """Модель викликає log_workout, потім відповідає текстом -> outcome ok, запис збережено."""

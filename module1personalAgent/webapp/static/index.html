@@ -260,7 +260,6 @@ async function load() {
 
   if (data.bot_name) {
     document.title = data.bot_name;
-    document.querySelector('h1').textContent = `Твій прогрес — ${data.bot_name}`;
   }
 
   const names = Object.keys(data.exercise_progression);

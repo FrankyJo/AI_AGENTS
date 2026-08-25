@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Прогрес</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1c1c1e);
+    --hint: var(--tg-theme-hint-color, #8e8e93);
+    --link: var(--tg-theme-link-color, #007aff);
+    --button: var(--tg-theme-button-color, #007aff);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
+    --card-border: rgba(128, 128, 128, 0.2);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 12px 12px 32px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 8px 4px 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--hint); text-transform: uppercase; letter-spacing: 0.03em; }
+  .card {
+    background: var(--secondary-bg);
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 14px;
+    border: 1px solid var(--card-border);
+  }
+  .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+  .row .label { color: var(--hint); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip {
+    background: var(--bg); border: 1px solid var(--card-border);
+    border-radius: 999px; padding: 4px 10px; font-size: 12px;
+  }
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; }
+  .stat .value { font-size: 20px; font-weight: 600; }
+  .stat .label { font-size: 11px; color: var(--hint); margin-top: 2px; }
+  select {
+    width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);
+    background: var(--bg); color: var(--text); font-size: 14px; margin-bottom: 10px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 2px; border-bottom: 1px solid var(--card-border); }
+  th { color: var(--hint); font-weight: 500; }
+  .empty { color: var(--hint); font-size: 13px; padding: 8px 0; }
+  .day-block { margin-bottom: 10px; }
+  .day-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  #error { color: #ff3b30; padding: 20px 4px; }
+  canvas { max-width: 100%; }
+</style>
+</head>
+<body>
+
+<h1>Твій прогрес</h1>
+<div id="content"></div>
+<div id="error" style="display:none"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+function fmtKg(n) { return (Math.round(n * 10) / 10).toLocaleString('uk-UA'); }
+function fmtTonnes(kg) { return (kg / 1000).toLocaleString('uk-UA', { maximumFractionDigits: 2 }); }
+
+function chip(text) { return `<span class="chip">${text}</span>`; }
+
+function renderProfile(profile) {
+  const bm = profile.body_metrics || {};
+  const measurements = Object.entries(bm.measurements || {});
+  return `
+    <div class="card">
+      <h2>Профіль</h2>
+      <div class="row"><span class="label">Мета</span><span>${profile.goals || '—'}</span></div>
+      <div class="row"><span class="label">Рівень</span><span>${profile.level || '—'}</span></div>
+      <div class="row"><span class="label">Вага тіла</span><span>${bm.weight_kg ? bm.weight_kg + ' кг' : '—'}</span></div>
+      ${profile.equipment && profile.equipment.length ? `<div class="chips">${profile.equipment.map(chip).join('')}</div>` : ''}
+      ${profile.constraints && profile.constraints.length ? `
+        <div class="row" style="margin-top:8px"><span class="label">Обмеження</span></div>
+        <div class="chips">${profile.constraints.map(c => chip(c.tag + (c.note ? ': ' + c.note : ''))).join('')}</div>` : ''}
+      ${measurements.length ? `
+        <div class="row" style="margin-top:8px"><span class="label">Обхвати</span></div>
+        <div class="chips">${measurements.map(([k, v]) => chip(`${k}: ${v}`)).join('')}</div>` : ''}
+    </div>`;
+}
+
+function renderProgram(program) {
+  if (!program.name) {
+    return `<div class="card"><h2>Програма</h2><div class="empty">Програму ще не складено</div></div>`;
+  }
+  const days = (program.days || []).map(d => `
+    <div class="day-block">
+      <div class="day-title">${d.day}</div>
+      <table><tbody>
+        ${(d.exercises || []).map(e => `<tr><td>${e.name}</td><td>${e.sets || ''}×${e.reps || ''}</td></tr>`).join('')}
+      </tbody></table>
+    </div>`).join('');
+  return `
+    <div class="card">
+      <h2>Програма — ${program.name}${program.type ? ' (' + program.type + ')' : ''}</h2>
+      ${days}
+    </div>`;
+}
+
+function renderStats(totalWorkouts, volumeSeries) {
+  const totalKg = volumeSeries.reduce((s, v) => s + v.volume_kg, 0);
+  return `
+    <div class="card">
+      <h2>Загальний тоннаж</h2>
+      <div class="stat-grid">
+        <div class="stat"><div class="value">${totalWorkouts}</div><div class="label">тренувань</div></div>
+        <div class="stat"><div class="value">${fmtTonnes(totalKg)} т</div><div class="label">піднято всього</div></div>
+      </div>
+      <canvas id="volumeChart" height="180"></canvas>
+    </div>`;
+}
+
+function renderExerciseSection(names) {
+  if (!names.length) {
+    return `<div class="card"><h2>Прогресія по вправах</h2><div class="empty">Ще немає записаних тренувань</div></div>`;
+  }
+  return `
+    <div class="card">
+      <h2>Прогресія по вправах</h2>
+      <select id="exerciseSelect">${names.map(n => `<option value="${n}">${n}</option>`).join('')}</select>
+      <canvas id="exerciseChart" height="180"></canvas>
+    </div>`;
+}
+
+function drawVolumeChart(series) {
+  const ctx = document.getElementById('volumeChart');
+  if (!ctx || !series.length) return;
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: series.map(v => v.date),
+      datasets: [{ label: 'Тоннаж, кг', data: series.map(v => v.volume_kg),
+                   borderColor: getComputedStyle(document.body).getPropertyValue('--link'),
+                   tension: 0.25, fill: false }]
+    },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+
+let exerciseChart = null;
+function drawExerciseChart(rows) {
+  const ctx = document.getElementById('exerciseChart');
+  if (!ctx) return;
+  if (exerciseChart) exerciseChart.destroy();
+  exerciseChart = new Chart(ctx, {
+    data: {
+      labels: rows.map(r => r.date),
+      datasets: [
+        { type: 'line', label: 'Макс. вага, кг', data: rows.map(r => r.top_weight_kg),
+          borderColor: '#ff9500', yAxisID: 'y', tension: 0.25 },
+        { type: 'bar', label: 'Обсяг, кг', data: rows.map(r => r.volume_kg),
+          backgroundColor: 'rgba(0,122,255,0.35)', yAxisID: 'y1' },
+      ]
+    },
+    options: {
+      scales: {
+        y: { position: 'left', title: { display: true, text: 'кг' } },
+        y1: { position: 'right', grid: { drawOnChartArea: false } },
+      }
+    }
+  });
+}
+
+async function load() {
+  const initData = tg ? tg.initData : '';
+  if (!initData) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = 'Відкрий цю сторінку через кнопку в боті — поза Telegram дані недоступні.';
+    return;
+  }
+  let resp;
+  try {
+    resp = await fetch('/api/dashboard?initData=' + encodeURIComponent(initData));
+  } catch (e) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = 'Не вдалося з’єднатися з сервером.';
+    return;
+  }
+  if (!resp.ok) {
+    document.getElementById('error').style.display = 'block';
+    document.getElementById('error').textContent = 'Помилка авторизації, відкрий сторінку заново через бота.';
+    return;
+  }
+  const data = await resp.json();
+
+  if (data.bot_name) {
+    document.title = data.bot_name;
+    document.querySelector('h1').textContent = `Твій прогрес — ${data.bot_name}`;
+  }
+
+  const names = Object.keys(data.exercise_progression);
+  document.getElementById('content').innerHTML =
+    renderStats(data.total_workouts, data.volume_series) +
+    renderExerciseSection(names) +
+    renderProfile(data.profile) +
+    renderProgram(data.program);
+
+  drawVolumeChart(data.volume_series);
+  if (names.length) {
+    drawExerciseChart(data.exercise_progression[names[0]]);
+    document.getElementById('exerciseSelect').addEventListener('change', (e) => {
+      drawExerciseChart(data.exercise_progression[e.target.value]);
+    });
+  }
+}
+
+load();
+</script>
+</body>
+</html>

@@ -3,10 +3,10 @@
 # перезапустити pm2-процеси. Безпечно запускати повторно. Без sudo — pm2
 # керує процесами від імені того самого користувача, що його запустив.
 #
-#   ssh user@сервер '/opt/AI_AGENTS/module1personalAgent/deploy/deploy.sh'
+#   ssh user@сервер '/home/ppv.codes/personaltrainer/AI_AGENTS/module1personalAgent/deploy/deploy.sh'
 set -euo pipefail
 
-REPO_DIR="/opt/AI_AGENTS"
+REPO_DIR="/home/ppv.codes/personaltrainer/AI_AGENTS"
 APP_DIR="$REPO_DIR/module1personalAgent"
 
 cd "$REPO_DIR"

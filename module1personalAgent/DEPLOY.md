@@ -21,16 +21,17 @@
 ## 1. Код і залежності
 
 ```bash
-git clone https://github.com/FrankyJo/AI_AGENTS.git /opt/AI_AGENTS
-cd /opt/AI_AGENTS/module1personalAgent
+cd /home/ppv.codes/personaltrainer
+git clone https://github.com/FrankyJo/AI_AGENTS.git
+cd AI_AGENTS/module1personalAgent
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-Якщо `/opt` вимагає sudo для клонування і репозиторій виявився root-own:
+Якщо клонування зробили через sudo і каталог вийшов root-own:
 
 ```bash
-sudo chown -R $(whoami):$(whoami) /opt/AI_AGENTS
+sudo chown -R $(whoami):$(whoami) /home/ppv.codes/personaltrainer/AI_AGENTS
 ```
 
 ## 2. `.env`
@@ -51,10 +52,14 @@ nano .env
 
 У реєстратора домену додай A-запис: `твій-домен.com` → IP цього сервера.
 
-## 4. Caddy (reverse proxy + автоматичний HTTPS)
+## 4. Reverse proxy + HTTPS
 
-`webapp/server.py` слухає лише `127.0.0.1:8000` — назовні дивиться тільки Caddy,
-який сам випускає й оновлює TLS-сертифікат.
+`webapp/server.py` слухає лише `127.0.0.1:8000` — назовні до нього має
+дивитись єдиний веб-сервер на портах 80/443. Який саме — залежить від сервера:
+
+### Варіант A — чистий VPS, порти 80/443 вільні
+
+Caddy сам випускає й оновлює TLS-сертифікат, конфіг у `deploy/Caddyfile`.
 
 Caddy немає в стандартних репозиторіях Debian/Ubuntu — треба додати офіційний
 apt-репозиторій ([caddyserver.com/docs/install](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)):
@@ -73,10 +78,49 @@ sudo sed -i 's/yourdomain.com/твій-домен.com/' /etc/caddy/Caddyfile
 sudo systemctl restart caddy
 ```
 
+Якщо `sudo ss -tlnp | grep -E ':80 |:443 '` показує, що порти вже зайняті
+(litespeed, nginx, apache тощо) — це не твій випадок, дивись варіант B.
+
+### Варіант B — сервер уже під панеллю (CyberPanel/LiteSpeed) — цей випадок
+
+Порти 80/443 тримає LiteSpeed заради інших сайтів на цьому VPS — Caddy тут не
+ставимо (`sudo systemctl disable --now caddy`, якщо встиг запустити). Прокидуємо
+через саму панель:
+
+1. **CyberPanel → Websites → Create Website** (або Create Child Domain, якщо
+   `personaltrainer.ppv.codes` — піддомен уже доданого `ppv.codes`) — переконайся,
+   що сайт для цього домену існує.
+2. **Websites → List Websites → [домен] → Manage → SSL → Issue SSL** —
+   випустить Let's Encrypt сертифікат (тепер спрацює, бо порт 80 вільний від
+   зациклених спроб Caddy).
+3. **Manage → Rewrite Rules** для цього сайту, додати:
+   ```
+   RewriteEngine On
+   RewriteRule ^(.*)$ http://127.0.0.1:8000$1 [P,L]
+   ```
+   Якщо `[P]`-проксі через rewrite поводиться нестабільно — надійніший спосіб:
+   **Manage → vHost Conf** (сирий конфіг OpenLiteSpeed) і додати нативний proxy:
+   ```
+   extprocessor personaltrainer-app {
+     type                    proxy
+     address                 127.0.0.1:8000
+     maxConns                100
+     pcKeepAliveTimeout      60
+     connTimeout             5
+     retryTimeout            0
+   }
+   context / {
+     type                    proxy
+     handler                 personaltrainer-app
+     addDefaultCharset       off
+   }
+   ```
+4. Перезапусти LiteSpeed (кнопка в CyberPanel, або `sudo systemctl restart lsws`).
+
 ## 5. pm2
 
 ```bash
-cd /opt/AI_AGENTS/module1personalAgent
+cd /home/ppv.codes/personaltrainer/AI_AGENTS/module1personalAgent
 pm2 start deploy/ecosystem.config.js
 pm2 save          # запам'ятати поточний список процесів
 pm2 startup       # виведе одну sudo-команду — виконай її, щоб pm2 піднімався разом із сервером
@@ -96,7 +140,7 @@ curl -I https://твій-домен.com/         # має віддати 200
 ## Оновлення (ручний деплой)
 
 ```bash
-/opt/AI_AGENTS/module1personalAgent/deploy/deploy.sh
+/home/ppv.codes/personaltrainer/AI_AGENTS/module1personalAgent/deploy/deploy.sh
 ```
 
 ## CI/CD (коли буде потрібно)

@@ -12,6 +12,7 @@ import datetime
 import random
 
 from domain.exercises import EXERCISES
+from domain.progress import normalize_sets
 from storage import store
 
 _chat_id_var = contextvars.ContextVar("chat_id", default=None)
@@ -171,23 +172,13 @@ def get_history(limit: int = 5) -> dict:
     return {"count": len(hist), "history": hist, "total_workouts": len(data["history"])}
 
 
-def _sets_from_entry_exercise(ex: dict) -> list:
-    """Уніфікує дві форми запису вправи в history: подетальну (sets_detail з
-    log_set/finish_exercise_set_log) і одним рядком (weight/reps з log_workout)."""
-    if ex.get("sets_detail"):
-        return ex["sets_detail"]
-    if ex.get("weight") or ex.get("reps"):
-        return [{"weight": ex.get("weight", ""), "reps": ex.get("reps", "")}]
-    return []
-
-
 def get_exercise_history(exercise: str, limit: int = 5) -> dict:
     data = store.load(_cid())
     occurrences = []
     for entry in reversed(data["history"]):
         for ex in entry["exercises"]:
             if ex["name"] == exercise:
-                occurrences.append({"date": entry["date"], "sets": _sets_from_entry_exercise(ex)})
+                occurrences.append({"date": entry["date"], "sets": normalize_sets(ex)})
         if len(occurrences) >= limit:
             break
     return {"exercise": exercise, "occurrences": occurrences[:limit]}

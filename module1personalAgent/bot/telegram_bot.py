@@ -11,10 +11,10 @@ import asyncio
 import datetime
 import logging
 
-from telegram import Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from config import BASE_PROMPT, TELEGRAM_BOT_TOKEN
+from config import BASE_PROMPT, BOT_NAME, PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from core import cost
 from core.agent import USAGE, reset_usage, run_agent
 from domain import backend
@@ -43,10 +43,28 @@ def handle_query(chat_id: int, text: str) -> dict:
 
 async def on_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Привіт! Я твій особистий тренер. Розкажи, чим займаєшся і яка в тебе "
-        "програма, і обов'язково згадай, якщо щось болить або є обмеження — "
-        "я це запам'ятаю і буду враховувати при підборі вправ."
+        f"Привіт! Я {BOT_NAME}, твій особистий тренер. Розкажи, чим займаєшся і "
+        "яка в тебе програма, і обов'язково згадай, якщо щось болить або є "
+        "обмеження — я це запам'ятаю і буду враховувати при підборі вправ.\n\n"
+        "Усі команди — /info."
     )
+
+
+INFO_TEXT_TEMPLATE = (
+    "Я {name} — персональний фітнес-тренер зі штучним інтелектом.\n\n"
+    "Команди:\n"
+    "/start — коротке привітання\n"
+    "/dashboard — відкрити прогрес, профіль і програму (графіки)\n"
+    "/usage — скільки токенів і $ ти витратив на бота: сьогодні / 7 днів / 30 днів\n"
+    "/info — цей список команд\n\n"
+    "Крім команд, просто пиши мені звичайним текстом: розказуй про тренування, "
+    "болі, вагу і повтори в підходах, проси скласти чи змінити програму — я все "
+    "запам'ятовую і веду облік прогресу."
+)
+
+
+async def on_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(INFO_TEXT_TEMPLATE.format(name=BOT_NAME))
 
 
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -58,6 +76,19 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         log.warning("outcome=%s chat_id=%s query=%r", result["outcome"], chat_id, text)
 
     await update.message.reply_text(result["answer"])
+
+
+async def on_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not PUBLIC_BASE_URL:
+        await update.message.reply_text(
+            "Дашборд ще не налаштовано: не задано PUBLIC_BASE_URL у .env "
+            "(HTTPS-адреса webapp/server.py, наприклад публічний URL від ngrok)."
+        )
+        return
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📊 Відкрити прогрес", web_app=WebAppInfo(url=PUBLIC_BASE_URL))
+    ]])
+    await update.message.reply_text("Тисни, щоб відкрити свій прогрес:", reply_markup=keyboard)
 
 
 def _usage_section(title: str, records: list, cutoff: datetime.datetime) -> str:
@@ -104,15 +135,27 @@ async def send_body_metrics_check_ins(context: ContextTypes.DEFAULT_TYPE) -> Non
             backend.mark_check_in_sent()
 
 
+async def _post_init(app: Application) -> None:
+    """Реєструє команди в меню Telegram (список за '/' у клієнті)."""
+    await app.bot.set_my_commands([
+        BotCommand("start", "Почати спочатку"),
+        BotCommand("dashboard", "Прогрес, профіль і програма"),
+        BotCommand("usage", "Скільки витрачено на бота"),
+        BotCommand("info", "Список усіх команд"),
+    ])
+
+
 def build_app() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise SystemExit(
             "Не знайдено TELEGRAM_BOT_TOKEN.\n"
             "  cp .env.example .env   і впишіть токен від @BotFather у .env"
         )
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
     app.add_handler(CommandHandler("start", on_start))
     app.add_handler(CommandHandler("usage", on_usage))
+    app.add_handler(CommandHandler("dashboard", on_dashboard))
+    app.add_handler(CommandHandler("info", on_info))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
     app.job_queue.run_daily(send_body_metrics_check_ins, time=datetime.time(hour=10, minute=0))
     return app

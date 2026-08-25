@@ -11,6 +11,7 @@ from config import BASE_PROMPT
 from core import cost
 from core.agent import USAGE, reset_usage, run_agent
 from domain import backend
+from storage import usage_log
 
 CHAT_ID = "cli-test"
 
@@ -26,6 +27,7 @@ def main() -> None:
     reset_usage()
 
     result = run_agent(system=BASE_PROMPT, tools=backend.tools(), query=query)
+    usage_log.append(CHAT_ID, dict(USAGE["by_model"]))
 
     print(f"Запит: {query}\n{'-' * 70}")
     print(result["answer"])

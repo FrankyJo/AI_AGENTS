@@ -20,6 +20,19 @@ def usd(by_model: dict) -> float:
     return round(total, 6)
 
 
+def aggregate(records: list) -> dict:
+    """Сумує by_model з кількох записів usage_log (кожен — {"by_model": {...}})
+    в один by_model-словник, придатний для usd()/breakdown()."""
+    total = {}
+    for r in records:
+        for model, u in r["by_model"].items():
+            m = total.setdefault(model, {"calls": 0, "in": 0, "out": 0})
+            m["calls"] += u["calls"]
+            m["in"] += u["in"]
+            m["out"] += u["out"]
+    return total
+
+
 def breakdown(by_model: dict) -> list:
     rows = []
     for model, u in by_model.items():

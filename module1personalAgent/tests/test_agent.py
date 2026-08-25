@@ -85,6 +85,117 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual(result["failures"][0]["tool"], "swap_exercise")
         self.assertTrue(result["trace"][0]["failed"])
 
+    def test_log_set_uses_expected_sets_from_program(self):
+        """Кількість підходів у програмі -> log_set підказує remaining саме за нею."""
+        backend.set_program("Спліт", [{"day": "День 1", "exercises": [
+            {"name": "Присідання зі штангою", "sets": 3, "reps": "10"}]}])
+
+        r1 = backend.log_set(exercise="Присідання зі штангою", weight="10кг", reps="12", day="День 1")
+        r2 = backend.log_set(exercise="Присідання зі штангою", weight="12кг", reps="10", day="День 1")
+        r3 = backend.log_set(exercise="Присідання зі штангою", weight="12кг", reps="8", day="День 1")
+
+        self.assertEqual([r1["logged_sets"], r2["logged_sets"], r3["logged_sets"]], [1, 2, 3])
+        self.assertEqual(r1["expected_sets"], 3)
+        self.assertEqual([r1["remaining"], r2["remaining"], r3["remaining"]], [2, 1, 0])
+
+    def test_log_set_without_program_defaults_expected_sets(self):
+        """Вправи немає в збереженій програмі -> дефолтні 4 очікувані підходи."""
+        r = backend.log_set(exercise="Молотки з гантелями", weight="12кг", reps="10")
+        self.assertEqual(r["expected_sets"], backend.DEFAULT_EXPECTED_SETS)
+
+    def test_finish_exercise_set_log_writes_history_and_clears_active(self):
+        """Завершення підрахунку -> запис у history з деталями підходів, active_set_log очищено."""
+        backend.log_set(exercise="Присідання зі штангою", weight="10кг", reps="12")
+        backend.log_set(exercise="Присідання зі штангою", weight="12кг", reps="10")
+
+        result = backend.finish_exercise_set_log()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total_sets"], 2)
+        self.assertFalse(result["early_stop"])
+        saved = store.load(CHAT_ID)
+        self.assertIsNone(saved["active_set_log"])
+        self.assertEqual(saved["history"][-1]["exercises"][0]["sets_detail"],
+                          [{"weight": "10кг", "reps": "12"}, {"weight": "12кг", "reps": "10"}])
+
+    def test_finish_exercise_set_log_early_stop_keeps_partial_sets(self):
+        """Користувач зупинився на 3 з 4 -> early_stop=true, зафіксовано лише зроблене."""
+        for weight, reps in [("10кг", "12"), ("12кг", "10"), ("12кг", "8")]:
+            backend.log_set(exercise="Молотки з гантелями", weight=weight, reps=reps)
+
+        result = backend.finish_exercise_set_log(early_stop=True)
+
+        self.assertEqual(result["total_sets"], 3)
+        self.assertTrue(result["early_stop"])
+
+    def test_finish_exercise_set_log_without_active_session_is_reported(self):
+        """Немає активного підрахунку -> явна помилка, а не тихе NoneType."""
+        result = backend.finish_exercise_set_log()
+        self.assertEqual(result, {"error": "no_active_exercise"})
+
+    def test_log_set_different_exercise_starts_fresh_count(self):
+        """Прийшла інша вправа посеред підрахунку -> починається новий підрахунок з нуля."""
+        backend.log_set(exercise="Присідання зі штангою", weight="10кг", reps="12")
+        backend.log_set(exercise="Присідання зі штангою", weight="12кг", reps="10")
+
+        r = backend.log_set(exercise="Молотки з гантелями", weight="12кг", reps="10")
+
+        self.assertEqual(r["logged_sets"], 1)
+
+    def test_update_body_metrics_merges_measurements(self):
+        """Повторні виклики update_body_metrics домержують заміри, а не перезаписують усе."""
+        backend.update_body_metrics(weight_kg=80, measurements={"талія": "82"})
+        backend.update_body_metrics(measurements={"стегно": "58"})
+
+        profile = backend.get_profile()
+
+        self.assertEqual(profile["body_metrics"]["weight_kg"], 80)
+        self.assertEqual(profile["body_metrics"]["measurements"], {"талія": "82", "стегно": "58"})
+
+    def test_set_program_stores_type_and_updated_at(self):
+        """set_program зберігає тип програми і дату оновлення для подальших рекомендацій."""
+        program = backend.set_program(
+            "Фулбаді", [{"day": "День 1", "exercises": []}], program_type="full_body")
+
+        self.assertEqual(program["type"], "full_body")
+        self.assertIsNotNone(program["updated_at"])
+
+    def test_get_exercise_history_merges_both_logging_flows(self):
+        """log_workout (одним рядком) і log_set+finish (подетально) -> обидва потрапляють в історію вправи, найновіші першими."""
+        backend.log_workout(date="2026-08-01", exercises=[
+            {"name": "Присідання зі штангою", "sets": 3, "reps": "10", "weight": "50кг"}])
+        backend.log_set(exercise="Присідання зі штангою", weight="55кг", reps="10")
+        backend.log_set(exercise="Присідання зі штангою", weight="55кг", reps="8")
+        backend.finish_exercise_set_log()
+
+        result = backend.get_exercise_history(exercise="Присідання зі штангою")
+
+        self.assertEqual(len(result["occurrences"]), 2)
+        self.assertEqual(result["occurrences"][0]["sets"],
+                          [{"weight": "55кг", "reps": "10"}, {"weight": "55кг", "reps": "8"}])
+        self.assertEqual(result["occurrences"][1]["sets"], [{"weight": "50кг", "reps": "10"}])
+
+    def test_update_body_metrics_schedules_next_check_in(self):
+        """Дані введено вручну -> наступне нагадування заплановане на майбутнє, не due сьогодні."""
+        backend.update_body_metrics(weight_kg=80)
+        self.assertFalse(backend.is_check_in_due())
+
+    def test_check_in_due_by_default_for_new_user(self):
+        """Ще жодного разу не питали -> нагадування вважається due (щоб не пропустити нового користувача)."""
+        self.assertTrue(backend.is_check_in_due())
+
+    def test_mark_check_in_sent_pushes_due_date_into_future(self):
+        """Після надсилання нагадування -> is_check_in_due стає false до наступного разу."""
+        self.assertTrue(backend.is_check_in_due())
+        backend.mark_check_in_sent()
+        self.assertFalse(backend.is_check_in_due())
+
+    def test_list_known_chat_ids_includes_users_with_saved_data(self):
+        """Файл користувача вже існує (з setUp) -> він у списку відомих chat_id."""
+        backend.get_profile()                          # гарантує, що файл точно збережений
+        store.save(CHAT_ID, store.load(CHAT_ID))
+        self.assertIn(CHAT_ID, store.list_chat_ids())
+
     def test_turns_exhausted_not_infinite_loop(self):
         """Модель нескінченно просить інструмент -> чесний turns_exhausted, а не зависання."""
         responses = [fake_resp([tool_use_block("get_profile", {})], "tool_use")] * agent.MAX_TURNS

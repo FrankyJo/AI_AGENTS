@@ -11,7 +11,7 @@ import datetime
 import json
 import time
 from anthropic import Anthropic, APIError, APIStatusError
-from config import API_KEY, MODEL, MAX_TOKENS, MAX_TURNS, MAX_COST_USD
+from config import API_KEY, MODEL, MODEL_FAST, MAX_TOKENS, MAX_TURNS, MAX_COST_USD
 from core import cost
 
 client = Anthropic(api_key=API_KEY)
@@ -53,9 +53,14 @@ def _call(**kwargs):
             raise
 
 
-def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
+def run_agent(system: str, tools: list, query: str, history: list = None, on_step=None) -> dict:
     """
     Цикл «міркуй → дій → спостерігай».
+
+    history — попередні репліки діалогу (лише видимий текст user/assistant,
+    без внутрішніх tool_use/tool_result одного запиту — інакше контекст ріс
+    би необмежено). Викликач сам вирішує, скільки зберігати і чи зберігати
+    взагалі (див. domain.backend.get_conversation/append_conversation).
 
     Повертає, окрім відповіді:
       outcome      — ok | turns_exhausted | api_error | budget_exceeded
@@ -68,7 +73,7 @@ def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
     # log_workout/log_set і може записати тренування під неправильною датою
     system = f"{system}\n\nСьогоднішня дата: {datetime.date.today().isoformat()}."
 
-    messages = [{"role": "user", "content": query}]
+    messages = list(history or []) + [{"role": "user", "content": query}]
     trace, failures = [], []
     spent_usd = 0.0
     started = time.time()
@@ -128,3 +133,25 @@ def run_agent(system: str, tools: list, query: str, on_step=None) -> dict:
                       "Спробуй розбити запит на частини.",
             "outcome": "turns_exhausted", "trace": trace, "failures": failures,
             "turns": MAX_TURNS, "elapsed_sec": round(time.time() - started, 2), "usage": {}}
+
+
+def summarize_into_notes(existing_notes: str, dropped_turns: list) -> str:
+    """Стискає репліки, що випадають з вікна історії (див.
+    domain.backend.append_conversation), у компактні довгострокові нотатки —
+    без цього старий контекст просто зникав би безслідно. Швидка/дешева
+    модель, бо це фонова бухгалтерія, а не основний діалог."""
+    if not dropped_turns:
+        return existing_notes
+
+    dialogue = "\n".join(f"{t['role']}: {t['content']}" for t in dropped_turns)
+    prompt = (
+        "Онови короткі нотатки про користувача новою реплікою діалогу, що "
+        "випадає з короткострокової історії. Залиш лише те, що варто "
+        "пам'ятати надовго (факти, вподобання, плани, важливі деталі) — не "
+        "механічний переказ реплік.\n\n"
+        f"Поточні нотатки:\n{existing_notes or '(порожньо)'}\n\n"
+        f"Нова репліка:\n{dialogue}\n\n"
+        "Оновлені нотатки (стисло, кілька речень):"
+    )
+    resp = _call(model=MODEL_FAST, max_tokens=300, messages=[{"role": "user", "content": prompt}])
+    return "".join(b.text for b in resp.content if b.type == "text").strip()

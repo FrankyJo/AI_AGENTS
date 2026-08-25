@@ -24,6 +24,10 @@ DEFAULT_EXPECTED_SETS = 4
 CHECK_IN_MIN_DAYS = 7
 CHECK_IN_MAX_DAYS = 14
 
+# скільки останніх пар user/assistant тримати в історії діалогу (обмежує
+# зростання контексту й вартості — старіші репліки просто забуваються)
+MAX_HISTORY_TURNS = 8
+
 
 def set_chat_id(chat_id) -> None:
     _chat_id_var.set(str(chat_id))
@@ -39,6 +43,38 @@ def _cid() -> str:
 def _constraint_tags() -> set:
     data = store.load(_cid())
     return {c["tag"] for c in data["profile"]["constraints"]}
+
+
+# ── історія діалогу (не інструмент для LLM — керує bot/telegram_bot.py) ──
+def get_conversation() -> list:
+    return store.load(_cid()).get("conversation", [])
+
+
+def append_conversation(user_text: str, assistant_text: str) -> list:
+    """Повертає репліки, що випали за межі вікна MAX_HISTORY_TURNS (порожній
+    список, якщо нічого не випало) — виклик передає їх у summarize_into_notes,
+    щоб не втрачати старий контекст безслідно, а стиснути в memory_notes."""
+    data = store.load(_cid())
+    data.setdefault("conversation", [])
+    data["conversation"].append({"role": "user", "content": user_text})
+    data["conversation"].append({"role": "assistant", "content": assistant_text})
+
+    limit = MAX_HISTORY_TURNS * 2
+    dropped = data["conversation"][:-limit] if len(data["conversation"]) > limit else []
+    data["conversation"] = data["conversation"][-limit:]
+
+    store.save(_cid(), data)
+    return dropped
+
+
+def get_memory_notes() -> str:
+    return store.load(_cid()).get("memory_notes", "")
+
+
+def update_memory_notes(notes: str) -> None:
+    data = store.load(_cid())
+    data["memory_notes"] = notes
+    store.save(_cid(), data)
 
 
 # ── профіль ──────────────────────────────────────────────────

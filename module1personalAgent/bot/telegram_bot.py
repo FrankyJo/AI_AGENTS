@@ -17,7 +17,7 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from config import BASE_PROMPT, BOT_NAME, PUBLIC_BASE_URL, TELEGRAM_BOT_TOKEN
 from core import cost
-from core.agent import USAGE, reset_usage, run_agent
+from core.agent import USAGE, reset_usage, run_agent, summarize_into_notes
 from domain import backend
 from storage import usage_log
 
@@ -33,11 +33,32 @@ CHECK_IN_TRIGGER = (
 )
 
 
-def handle_query(chat_id: int, text: str) -> dict:
-    """Виконується в окремому потоці — run_agent синхронний і блокуючий."""
+def handle_query(chat_id: int, text: str, use_history: bool = True) -> dict:
+    """Виконується в окремому потоці — run_agent синхронний і блокуючий.
+
+    use_history=False — для системних тригерів (нагадування), щоб їхній
+    службовий текст не потрапляв у діалог як нібито сказане користувачем."""
     backend.set_chat_id(chat_id)
     reset_usage()
-    result = run_agent(system=BASE_PROMPT, tools=backend.tools(), query=text)
+
+    system = BASE_PROMPT
+    history = None
+    if use_history:
+        history = backend.get_conversation()
+        notes = backend.get_memory_notes()
+        if notes:
+            system = f"{BASE_PROMPT}\n\nДовгострокові нотатки про користувача:\n{notes}"
+
+    result = run_agent(system=system, tools=backend.tools(), query=text, history=history)
+
+    if use_history:
+        dropped = backend.append_conversation(text, result["answer"])
+        if dropped:
+            # рахуємо ДО usage_log.append — інакше вартість сумаризації "втече"
+            # у лог наступного, ніяк не пов'язаного повідомлення
+            notes = summarize_into_notes(backend.get_memory_notes(), dropped)
+            backend.update_memory_notes(notes)
+
     usage_log.append(chat_id, dict(USAGE["by_model"]))
     return result
 
@@ -147,7 +168,7 @@ async def send_body_metrics_check_ins(context: ContextTypes.DEFAULT_TYPE) -> Non
         if not backend.is_check_in_due():
             continue
         try:
-            result = await asyncio.to_thread(handle_query, chat_id, CHECK_IN_TRIGGER)
+            result = await asyncio.to_thread(handle_query, chat_id, CHECK_IN_TRIGGER, False)
             await context.bot.send_message(chat_id=int(chat_id), text=result["answer"])
         except Exception:
             log.exception("не вдалося надіслати нагадування chat_id=%s", chat_id)

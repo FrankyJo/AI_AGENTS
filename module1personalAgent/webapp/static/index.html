@@ -15,47 +15,93 @@
     --button: var(--tg-theme-button-color, #007aff);
     --button-text: var(--tg-theme-button-text-color, #ffffff);
     --secondary-bg: var(--tg-theme-secondary-bg-color, #f2f2f7);
-    --card-border: rgba(128, 128, 128, 0.2);
+    --card-border: rgba(128, 128, 128, 0.16);
+    --warn: #ff9500;
+
+    /* єдина шкала відступів — усі gap/padding/margin у файлі беруться звідси */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 24px;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 12px 12px 32px;
+    padding: var(--sp-4) var(--sp-4) var(--sp-5);
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.4;
   }
-  h1 { font-size: 20px; margin: 8px 4px 16px; }
-  h2 { font-size: 15px; margin: 0 0 10px; color: var(--hint); text-transform: uppercase; letter-spacing: 0.03em; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0 0 var(--sp-4); }
+  h2 {
+    font-size: 13px; font-weight: 600; margin: 0 0 var(--sp-3);
+    color: var(--hint); text-transform: uppercase; letter-spacing: 0.04em;
+  }
   .card {
     background: var(--secondary-bg);
-    border-radius: 14px;
-    padding: 14px;
-    margin-bottom: 14px;
+    border-radius: 16px;
+    padding: var(--sp-4);
+    margin-bottom: var(--sp-4);
     border: 1px solid var(--card-border);
   }
-  .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
-  .row .label { color: var(--hint); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+  /* профіль: кожне поле — лейбл зверху, значення знизу. Один патерн для всіх
+     полів (короткі й довгі) навмисно, замість row+stack впереміш — так
+     відступи скрізь однакові незалежно від довжини тексту. */
+  .field { margin-bottom: var(--sp-3); }
+  .field:last-child { margin-bottom: 0; }
+  .field .label {
+    display: block; font-size: 12px; color: var(--hint);
+    margin-bottom: var(--sp-1);
+  }
+  .field .value { font-size: 15px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
   .chip {
     background: var(--bg); border: 1px solid var(--card-border);
-    border-radius: 999px; padding: 4px 10px; font-size: 12px;
+    border-radius: 999px; padding: var(--sp-1) var(--sp-3); font-size: 12px; line-height: 1.3;
   }
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .stat { background: var(--bg); border-radius: 10px; padding: 10px; text-align: center; }
-  .stat .value { font-size: 20px; font-weight: 600; }
+
+  .constraint {
+    background: var(--bg); border-left: 3px solid var(--warn); border-radius: 8px;
+    padding: var(--sp-2) var(--sp-3); font-size: 13px;
+  }
+  .constraint + .constraint { margin-top: var(--sp-2); }
+  .constraint .tag {
+    display: block; font-size: 11px; font-weight: 700; color: var(--warn);
+    text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 2px;
+  }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+  .stat { background: var(--bg); border-radius: 12px; padding: var(--sp-3); text-align: center; }
+  .stat .value { font-size: 20px; font-weight: 700; }
   .stat .label { font-size: 11px; color: var(--hint); margin-top: 2px; }
+
   select {
-    width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--card-border);
-    background: var(--bg); color: var(--text); font-size: 14px; margin-bottom: 10px;
+    width: 100%; padding: var(--sp-2) var(--sp-3); border-radius: 10px;
+    border: 1px solid var(--card-border); background: var(--bg); color: var(--text);
+    font-size: 14px; margin-bottom: var(--sp-3); -webkit-appearance: none; appearance: none;
   }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 4px 2px; border-bottom: 1px solid var(--card-border); }
-  th { color: var(--hint); font-weight: 500; }
-  .empty { color: var(--hint); font-size: 13px; padding: 8px 0; }
-  .day-block { margin-bottom: 10px; }
-  .day-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-  #error { color: #ff3b30; padding: 20px 4px; }
+
+  .day-block { margin-bottom: var(--sp-4); }
+  .day-block:last-child { margin-bottom: 0; }
+  .day-title {
+    font-weight: 700; font-size: 14px; margin-bottom: var(--sp-2);
+    padding-bottom: var(--sp-1); border-bottom: 1px solid var(--card-border);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: var(--sp-2) 0; border-bottom: 1px solid var(--card-border); vertical-align: baseline; }
+  tr:last-child td { border-bottom: none; }
+  td.ex-name { padding-right: var(--sp-3); }
+  td.ex-sets {
+    text-align: right; white-space: nowrap; color: var(--hint);
+    font-variant-numeric: tabular-nums; width: 1%;
+  }
+
+  .empty { color: var(--hint); font-size: 13px; }
+  #error { color: #ff3b30; padding: var(--sp-5) var(--sp-1); }
   canvas { max-width: 100%; }
 </style>
 </head>
@@ -74,23 +120,36 @@ function fmtTonnes(kg) { return (kg / 1000).toLocaleString('uk-UA', { maximumFra
 
 function chip(text) { return `<span class="chip">${text}</span>`; }
 
+function field(label, value) {
+  return `<div class="field"><span class="label">${label}</span><span class="value">${value}</span></div>`;
+}
+
 function renderProfile(profile) {
   const bm = profile.body_metrics || {};
   const measurements = Object.entries(bm.measurements || {});
   return `
     <div class="card">
       <h2>Профіль</h2>
-      <div class="row"><span class="label">Ім'я</span><span>${profile.name || '—'}</span></div>
-      <div class="row"><span class="label">Мета</span><span>${profile.goals || '—'}</span></div>
-      <div class="row"><span class="label">Рівень</span><span>${profile.level || '—'}</span></div>
-      <div class="row"><span class="label">Вага тіла</span><span>${bm.weight_kg ? bm.weight_kg + ' кг' : '—'}</span></div>
-      ${profile.equipment && profile.equipment.length ? `<div class="chips">${profile.equipment.map(chip).join('')}</div>` : ''}
+      ${field("Ім'я", profile.name || '—')}
+      ${field('Мета', profile.goals || '—')}
+      ${field('Рівень', profile.level || '—')}
+      ${field('Вага тіла', bm.weight_kg ? bm.weight_kg + ' кг' : '—')}
+      ${profile.equipment && profile.equipment.length ? `
+        <div class="field">
+          <span class="label">Обладнання</span>
+          <div class="chips">${profile.equipment.map(chip).join('')}</div>
+        </div>` : ''}
       ${profile.constraints && profile.constraints.length ? `
-        <div class="row" style="margin-top:8px"><span class="label">Обмеження</span></div>
-        <div class="chips">${profile.constraints.map(c => chip(c.tag + (c.note ? ': ' + c.note : ''))).join('')}</div>` : ''}
+        <div class="field">
+          <span class="label">Обмеження</span>
+          ${profile.constraints.map(c => `
+            <div class="constraint"><span class="tag">${c.tag}</span>${c.note || ''}</div>`).join('')}
+        </div>` : ''}
       ${measurements.length ? `
-        <div class="row" style="margin-top:8px"><span class="label">Обхвати</span></div>
-        <div class="chips">${measurements.map(([k, v]) => chip(`${k}: ${v}`)).join('')}</div>` : ''}
+        <div class="field">
+          <span class="label">Обхвати</span>
+          <div class="chips">${measurements.map(([k, v]) => chip(`${k}: ${v}`)).join('')}</div>
+        </div>` : ''}
     </div>`;
 }
 
@@ -102,7 +161,8 @@ function renderProgram(program) {
     <div class="day-block">
       <div class="day-title">${d.day}</div>
       <table><tbody>
-        ${(d.exercises || []).map(e => `<tr><td>${e.name}</td><td>${e.sets || ''}×${e.reps || ''}</td></tr>`).join('')}
+        ${(d.exercises || []).map(e => `
+          <tr><td class="ex-name">${e.name}</td><td class="ex-sets">${e.sets || ''}×${e.reps || ''}</td></tr>`).join('')}
       </tbody></table>
     </div>`).join('');
   return `

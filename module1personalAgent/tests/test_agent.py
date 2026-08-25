@@ -61,6 +61,44 @@ class TestAgentLoop(unittest.TestCase):
         self.assertIn(datetime.date.today().isoformat(), sent_system)
         self.assertIn("базовий промпт", sent_system)
 
+    def test_run_agent_seeds_messages_with_prior_history(self):
+        """Без цього репліка «так, вона» на другому повідомленні не має контексту,
+        про яку вправу йшлося — модель бачить лише поточний query."""
+        prior = [{"role": "user", "content": "А згинання ніг лежа?"},
+                 {"role": "assistant", "content": "Є вправа «Згинання ніг лежа в тренажері»."}]
+        responses = [fake_resp([text_block("ok")], "end_turn")]
+
+        with patch.object(agent, "_call", side_effect=responses) as mock_call:
+            agent.run_agent(system="base", tools=[], query="Так, вона", history=prior)
+
+        sent_messages = mock_call.call_args.kwargs["messages"]
+        self.assertEqual(sent_messages[0], prior[0])
+        self.assertEqual(sent_messages[1], prior[1])
+        self.assertEqual(sent_messages[2], {"role": "user", "content": "Так, вона"})
+
+    def test_run_agent_without_history_starts_fresh(self):
+        responses = [fake_resp([text_block("ok")], "end_turn")]
+        with patch.object(agent, "_call", side_effect=responses) as mock_call:
+            agent.run_agent(system="base", tools=[], query="test")
+        self.assertEqual(mock_call.call_args.kwargs["messages"], [{"role": "user", "content": "test"}])
+
+    def test_summarize_into_notes_noop_when_nothing_dropped(self):
+        """Немає що сумаризувати -> старі нотатки повертаються без зайвого виклику API."""
+        with patch.object(agent, "_call") as mock_call:
+            result = agent.summarize_into_notes("стара нотатка", [])
+        self.assertEqual(result, "стара нотатка")
+        mock_call.assert_not_called()
+
+    def test_summarize_into_notes_uses_fast_model(self):
+        resp = fake_resp([text_block("нова нотатка")], "end_turn")
+        dropped = [{"role": "user", "content": "Хочу схуднути"},
+                   {"role": "assistant", "content": "Записав мету."}]
+        with patch.object(agent, "_call", return_value=resp) as mock_call:
+            result = agent.summarize_into_notes("", dropped)
+
+        self.assertEqual(result, "нова нотатка")
+        self.assertEqual(mock_call.call_args.kwargs["model"], agent.MODEL_FAST)
+
     def test_ok_happy_path_logs_workout(self):
         """Модель викликає log_workout, потім відповідає текстом -> outcome ok, запис збережено."""
         responses = [
@@ -236,6 +274,46 @@ class TestAgentLoop(unittest.TestCase):
         """Дані введено вручну -> наступне нагадування заплановане на майбутнє, не due сьогодні."""
         backend.update_body_metrics(weight_kg=80)
         self.assertFalse(backend.is_check_in_due())
+
+    def test_get_conversation_starts_empty(self):
+        self.assertEqual(backend.get_conversation(), [])
+
+    def test_append_conversation_stores_user_and_assistant_pair(self):
+        backend.append_conversation("А згинання ніг лежа?", "Є вправа «Згинання ніг лежа в тренажері».")
+        conv = backend.get_conversation()
+        self.assertEqual(conv, [
+            {"role": "user", "content": "А згинання ніг лежа?"},
+            {"role": "assistant", "content": "Є вправа «Згинання ніг лежа в тренажері»."},
+        ])
+
+    def test_append_conversation_trims_to_max_history_turns(self):
+        """Довга розмова -> зберігаються лише останні MAX_HISTORY_TURNS пар, щоб контекст не ріс безмежно."""
+        for i in range(backend.MAX_HISTORY_TURNS + 3):
+            backend.append_conversation(f"питання {i}", f"відповідь {i}")
+
+        conv = backend.get_conversation()
+
+        self.assertEqual(len(conv), backend.MAX_HISTORY_TURNS * 2)
+        self.assertEqual(conv[0]["content"], "питання 3")           # найстаріші 3 пари відкинуто
+        self.assertEqual(conv[-1]["content"], f"відповідь {backend.MAX_HISTORY_TURNS + 2}")
+
+    def test_append_conversation_returns_empty_when_under_limit(self):
+        self.assertEqual(backend.append_conversation("q", "a"), [])
+
+    def test_append_conversation_returns_dropped_pair_when_over_limit(self):
+        """Найстаріша пара, що випадає з вікна, має повернутись — інакше нема що сумаризувати в memory_notes."""
+        for i in range(backend.MAX_HISTORY_TURNS):
+            backend.append_conversation(f"q{i}", f"a{i}")
+
+        dropped = backend.append_conversation("qN", "aN")
+
+        self.assertEqual(dropped, [{"role": "user", "content": "q0"},
+                                    {"role": "assistant", "content": "a0"}])
+
+    def test_memory_notes_roundtrip(self):
+        self.assertEqual(backend.get_memory_notes(), "")
+        backend.update_memory_notes("Юзер хоче схуднути з 95 до 90 кг.")
+        self.assertEqual(backend.get_memory_notes(), "Юзер хоче схуднути з 95 до 90 кг.")
 
     def test_check_in_due_by_default_for_new_user(self):
         """Ще жодного разу не питали -> нагадування вважається due (щоб не пропустити нового користувача)."""

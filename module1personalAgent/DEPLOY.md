@@ -143,6 +143,22 @@ curl -I https://твій-домен.com/         # має віддати 200
 /home/ppv.codes/personaltrainer/AI_AGENTS/module1personalAgent/deploy/deploy.sh
 ```
 
+### Разова міграція на SQLite
+
+Storage перейшов з окремих `storage/data/<chat_id>.json` на єдиний
+`storage/data/app.db` (SQLite). Якщо на сервері вже є старі JSON-файли з
+реальними даними користувачів — після цього деплою вони "зникнуть" (store.py
+дивиться вже в БД), поки не прогониш міграцію ОДИН раз:
+
+```bash
+cd /home/ppv.codes/personaltrainer/AI_AGENTS/module1personalAgent
+.venv/bin/python scripts/migrate_json_to_sqlite.py
+pm2 restart personal-trainer-bot personal-trainer-webapp
+```
+
+Старі `.json`-файли скрипт не видаляє — перевір, що дані на місці, і приберіть
+вручну, коли переконаєшся.
+
 ## CI/CD (коли буде потрібно)
 
 Workflow `.github/workflows/deploy-personal-trainer-bot.yml` уже в репозиторії

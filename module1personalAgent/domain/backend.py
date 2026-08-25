@@ -9,6 +9,7 @@ chat_id прокидується через contextvar, а не через ар�
 
 import contextvars
 import datetime
+import difflib
 import random
 
 from domain.exercises import EXERCISES
@@ -186,13 +187,26 @@ def list_exercises(muscle_group: str = None, equipment: str = None,
 
 
 def get_exercise_details(name: str) -> dict:
-    for e in EXERCISES:
-        if e["name"] == name:
-            return {"name": e["name"], "muscle_group": e["muscle_group"], "target": e["target"],
-                    "equipment": e["equipment"], "description": e["description"], "steps": e["steps"],
-                    "contraindications": e["contraindications"],
-                    "gif_path": e["gif_path"], "image_path": e["image_path"]}
-    return {"error": "exercise_not_found", "name": name}
+    """Ловить лише типографські розбіжності (регістр, зайвий пробіл, описка) —
+    difflib на повному рядку з високим порогом. НЕ намагається вгадувати
+    вправу за частковим збігом слів: каталог часто зве той самий рух зовсім
+    інакше поставленими словами («Важільний тренажер розгинання ніг» замість
+    «Розгинання ніг сидячи»), і будь-яка евристика на цьому плутає різні
+    вправи — а тиха підміна тут небезпечніша за чесний exercise_not_found
+    (у різних вправ різні протипоказання). Коли не знайдено — агент має сам
+    пошукати через list_exercises (див. правило 14 в BASE_PROMPT), а не
+    здаватися чи вигадувати."""
+    match = next((e for e in EXERCISES if e["name"] == name), None)
+    if not match:
+        close = difflib.get_close_matches(name, [e["name"] for e in EXERCISES], n=1, cutoff=0.85)
+        if close:
+            match = next(e for e in EXERCISES if e["name"] == close[0])
+    if not match:
+        return {"error": "exercise_not_found", "name": name}
+    return {"name": match["name"], "muscle_group": match["muscle_group"], "target": match["target"],
+            "equipment": match["equipment"], "description": match["description"], "steps": match["steps"],
+            "contraindications": match["contraindications"],
+            "gif_path": match["gif_path"], "image_path": match["image_path"]}
 
 
 # ── програма тренувань ──────────────────────────────────────
@@ -387,7 +401,9 @@ TOOL_SCHEMAS = {
         "викликай ПЕРЕД тим як пропонуєш користувачу зробити конкретну вправу "
         "прямо зараз (наживо, у процесі тренування), щоб бот міг показати "
         "техніку і прикріпити гіфку. Не викликай для кожної вправи в усій "
-        "програмі одразу — лише для тієї, яку користувач буде робити зараз.",
+        "програмі одразу — лише для тієї, яку користувач буде робити зараз. "
+        "Якщо повернувся exercise_not_found — не здавайся: пошукай вправу за "
+        "змістом через list_exercises і повтори виклик з точною назвою звідти.",
         {"name": {"type": "string", "description": "Точна назва вправи, як у list_exercises"}},
         ["name"]),
     "get_program": _schema(

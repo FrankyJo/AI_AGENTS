@@ -164,6 +164,32 @@ class TestAgentLoop(unittest.TestCase):
         result = backend.get_exercise_details("Вигадана вправа, якої нема")
         self.assertEqual(result, {"error": "exercise_not_found", "name": "Вигадана вправа, якої нема"})
 
+    def test_get_exercise_details_tolerates_typo_via_high_threshold_diff(self):
+        """Дрібна описка/зайвий пробіл — точно та сама вправа, difflib на високому порозі ловить."""
+        fixture = [{"name": "Присідання зі штангою", "muscle_group": "ноги", "target": "quads",
+                    "equipment": ["штанга"], "contraindications": ["knee"],
+                    "description": "текст", "steps": [], "gif_path": "/tmp/fake.gif", "image_path": None}]
+        with patch.object(backend, "EXERCISES", fixture):
+            result = backend.get_exercise_details("Присідання зі штангою ")   # зайвий пробіл
+        self.assertEqual(result["name"], "Присідання зі штангою")
+
+    def test_get_exercise_details_does_not_guess_across_different_exercises(self):
+        """Регресія: «Розгинання ніг сидячи» не повинно тихо підмінюватись на
+        «Штанга сидячи ... розгинання на трицепс» лише через спільні слова
+        «сидячи»/«розгинання» — це геть різні вправи з різними протипоказаннями,
+        краще чесний exercise_not_found, ніж помилкова впевнена відповідь."""
+        fixture = [
+            {"name": "Важільний тренажер розгинання ніг", "muscle_group": "ноги", "target": "quads",
+             "equipment": ["тренажер"], "contraindications": ["knee"],
+             "description": "", "steps": [], "gif_path": None, "image_path": None},
+            {"name": "Штанга сидячи вузьким хватом за шия розгинання на трицепс", "muscle_group": "руки",
+             "target": "triceps", "equipment": ["штанга"], "contraindications": ["elbow"],
+             "description": "", "steps": [], "gif_path": None, "image_path": None},
+        ]
+        with patch.object(backend, "EXERCISES", fixture):
+            result = backend.get_exercise_details("Розгинання ніг сидячи")
+        self.assertEqual(result, {"error": "exercise_not_found", "name": "Розгинання ніг сидячи"})
+
     def test_swap_exercise_unknown_day_is_tracked_not_swallowed(self):
         """Інструмент повернув {'error': ...} на неіснуючий день -> крок позначено failed."""
         backend.set_program("Спліт", [{"day": "День 1", "exercises": [{"name": "Присідання", "sets": 3, "reps": "10"}]}])

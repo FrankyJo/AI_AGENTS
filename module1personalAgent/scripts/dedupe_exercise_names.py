@@ -13,6 +13,11 @@
 що вперше з'явилась в history (оригінал, а не пізніше перефразування);
 інакше — найчастіша.
 
+Автокластеризація ловить лише схожі за написанням варіанти. Коли українського
+варіанту в даних немає взагалі (назва існує тільки російською) або рядки
+розходяться сильніше за поріг схожості (описки) — порівнювати нема з чим, тому
+такі випадки додаються вручну в MANUAL_TRANSLATIONS нижче.
+
 За замовчуванням — dry-run, нічого не зберігає, тільки показує план замін.
 
     python scripts/dedupe_exercise_names.py <chat_id>              # dry-run
@@ -32,6 +37,27 @@ from storage import store
 
 CATALOG_NAMES = set(e["name"] for e in EXERCISES)
 SIMILARITY_THRESHOLD = 0.75
+
+# Ручні переклади для випадків, коли українського варіанту немає взагалі
+# ніде в даних користувача (автокластеризація тоді порівнювати не з чим) —
+# або коли рядки відрізняються сильніше, ніж дозволяє SIMILARITY_THRESHOLD
+# (описки на кшталт «Подьем» замість «Подъем»). Доповнюй за потреби —
+# формат: {як записано (будь-якою мовою/з опискою): канонічно українською}.
+MANUAL_TRANSLATIONS = {
+    "Жим от груди в тренажёре": "Жим від грудей у тренажері",
+    "Жим гантелей на грудь": "Жим гантелей на груди",
+    "Брусья": "Бруси",
+    "Разгибание гантели из-за головы на трицепс": "Розгинання гантелі з-за голови на трицепс",
+    "Разгибание рук на блоке": "Розгинання рук на блоці",
+    "Тяга верхнего блока": "Тяга верхнього блоку",
+    "Горизонтальная тяга": "Горизонтальна тяга",
+    "Подьем гантелей": "Підйом гантелей на біцепс",
+    "Разгибание ног": "Розгинання ніг",
+    "Жим на плечи": "Жим на плечі",
+    "Сгибание ног сидя": "Згинання ніг сидячи",
+    "Разведение гантелей в стороны": "Розведення гантелей в сторони",
+    "Задняя дельта в бабочке": "Задня дельта в метелику",
+}
 
 
 def cluster_names(names: list) -> list:
@@ -122,12 +148,24 @@ def apply_rename(data: dict, rename_map: dict) -> int:
     return renamed
 
 
+def remove_history_dates(data: dict, dates: set) -> int:
+    """Прибирає цілі записи history за датою — для випадків, коли вся сесія
+    задублена (напр. користувач двічі надіслав ту саму програму)."""
+    before = len(data["history"])
+    data["history"] = [e for e in data["history"] if e.get("date") not in dates]
+    return before - len(data["history"])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("chat_id")
     parser.add_argument("--apply", action="store_true",
                          help="Реально зберегти зміни (без цього — тільки показ плану)")
+    parser.add_argument("--remove-dates", default="",
+                         help="Через кому: дати history, які треба видалити цілком "
+                              "(напр. дублі-сесії з неправильним роком) — 2024-08-19,2024-08-21")
     args = parser.parse_args()
+    remove_dates = {d.strip() for d in args.remove_dates.split(",") if d.strip()}
 
     data = store.load(args.chat_id)
     counts = collect_name_counts(data)
@@ -141,18 +179,28 @@ def main() -> None:
             if name != canonical:
                 rename_map[name] = canonical
 
-    if not rename_map:
-        print("Дублів (схожих назв) не знайдено.")
+    manual_hits = {k: v for k, v in MANUAL_TRANSLATIONS.items() if k in counts and k != v}
+    rename_map.update(manual_hits)                    # ручний переклад має пріоритет
+
+    if not rename_map and not remove_dates:
+        print("Дублів (схожих назв) не знайдено, дат на видалення не вказано.")
         return
 
-    print("Пропоновані заміни:")
-    for old, new in rename_map.items():
-        print(f"  {old!r} -> {new!r}")
+    if rename_map:
+        print("Пропоновані заміни:")
+        for old, new in rename_map.items():
+            tag = " (ручний переклад)" if old in manual_hits else ""
+            print(f"  {old!r} -> {new!r}{tag}")
+
+    if remove_dates:
+        matching = [e["date"] for e in data["history"] if e.get("date") in remove_dates]
+        print(f"\nБуде видалено записів history: {len(matching)} (дати: {sorted(remove_dates)})")
 
     if args.apply:
         n = apply_rename(data, rename_map)
+        removed = remove_history_dates(data, remove_dates) if remove_dates else 0
         store.save(args.chat_id, data)
-        print(f"\nЗастосовано. Перейменовано {n} входжень.")
+        print(f"\nЗастосовано. Перейменовано {n} входжень, видалено {removed} записів history.")
     else:
         print("\nЦе dry-run, нічого не збережено. Додай --apply, щоб застосувати.")
 

@@ -80,5 +80,35 @@ class TestApplyRename(unittest.TestCase):
         self.assertEqual(data["program"]["days"][0]["exercises"][0]["name"], "Присідання")
 
 
+class TestRemoveHistoryDates(unittest.TestCase):
+
+    def test_removes_only_matching_dates(self):
+        data = {"history": [
+            {"date": "2024-08-19", "exercises": []},
+            {"date": "2026-08-19", "exercises": []},
+            {"date": "2026-08-21", "exercises": []},
+        ]}
+        removed = dedupe.remove_history_dates(data, {"2024-08-19"})
+        self.assertEqual(removed, 1)
+        self.assertEqual([e["date"] for e in data["history"]], ["2026-08-19", "2026-08-21"])
+
+    def test_returns_zero_when_no_dates_match(self):
+        data = {"history": [{"date": "2026-08-19", "exercises": []}]}
+        self.assertEqual(dedupe.remove_history_dates(data, {"1999-01-01"}), 0)
+
+
+class TestManualTranslations(unittest.TestCase):
+
+    def test_no_translation_maps_to_itself(self):
+        """Кожен ручний переклад має реально щось міняти, а не бути записаним даремно."""
+        no_ops = [k for k, v in dedupe.MANUAL_TRANSLATIONS.items() if k == v]
+        self.assertEqual(no_ops, [])
+
+    def test_translation_targets_do_not_need_further_translation(self):
+        """Ціль перекладу сама не повинна бути ключем іншого перекладу (інакше ланцюжок недороблений)."""
+        chained = [k for k in dedupe.MANUAL_TRANSLATIONS.values() if k in dedupe.MANUAL_TRANSLATIONS]
+        self.assertEqual(chained, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -80,6 +80,7 @@ function renderProfile(profile) {
   return `
     <div class="card">
       <h2>Профіль</h2>
+      <div class="row"><span class="label">Ім'я</span><span>${profile.name || '—'}</span></div>
       <div class="row"><span class="label">Мета</span><span>${profile.goals || '—'}</span></div>
       <div class="row"><span class="label">Рівень</span><span>${profile.level || '—'}</span></div>
       <div class="row"><span class="label">Вага тіла</span><span>${bm.weight_kg ? bm.weight_kg + ' кг' : '—'}</span></div>

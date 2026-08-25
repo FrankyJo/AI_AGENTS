@@ -44,6 +44,12 @@ class TestAgentLoop(unittest.TestCase):
     def tearDown(self):
         store.delete(CHAT_ID)
 
+    def test_update_profile_saves_name(self):
+        """update_profile(name=...) зберігає ім'я, з яким потім бот звертається до користувача."""
+        profile = backend.update_profile(name="Денис")
+        self.assertEqual(profile["name"], "Денис")
+        self.assertEqual(backend.get_profile()["name"], "Денис")
+
     def test_ok_happy_path_logs_workout(self):
         """Модель викликає log_workout, потім відповідає текстом -> outcome ok, запис збережено."""
         responses = [

@@ -11,7 +11,7 @@ DATA_DIR = pathlib.Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 DEFAULT = {
-    "profile": {"goals": "", "level": "", "equipment": [], "constraints": [],
+    "profile": {"name": "", "goals": "", "level": "", "equipment": [], "constraints": [],
                 "body_metrics": {"weight_kg": None, "measurements": {}, "updated_at": None,
                                   "next_check_in": None}},
     "program": {"name": "", "type": "", "days": [], "updated_at": None},

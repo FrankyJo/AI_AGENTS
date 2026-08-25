@@ -46,8 +46,10 @@ def get_profile() -> dict:
     return store.load(_cid())["profile"]
 
 
-def update_profile(goals: str = None, level: str = None, equipment: list = None) -> dict:
+def update_profile(name: str = None, goals: str = None, level: str = None, equipment: list = None) -> dict:
     data = store.load(_cid())
+    if name is not None:
+        data["profile"]["name"] = name
     if goals is not None:
         data["profile"]["goals"] = goals
     if level is not None:
@@ -300,9 +302,12 @@ TOOL_SCHEMAS = {
         {}, []),
     "update_profile": _schema(
         "update_profile",
-        "Оновлює цілі, рівень підготовки або список доступного обладнання. "
-        "Не використовуй для травм/обмежень — для них є add_constraint.",
-        {"goals": {"type": "string", "description": "Мета тренувань, наприклад «набір маси»"},
+        "Оновлює ім'я користувача, цілі, рівень підготовки або список "
+        "доступного обладнання. Не використовуй для травм/обмежень — для них "
+        "є add_constraint.",
+        {"name": {"type": "string",
+                    "description": "Ім'я користувача або як до нього звертатися"},
+         "goals": {"type": "string", "description": "Мета тренувань, наприклад «набір маси»"},
          "level": {"type": "string", "description": "Рівень: новачок/середній/просунутий"},
          "equipment": {"type": "array", "items": {"type": "string"},
                         "description": "Доступне обладнання, наприклад [\"гантелі\", \"турнік\"]"}},

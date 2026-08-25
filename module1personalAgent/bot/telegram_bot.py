@@ -10,6 +10,7 @@ Telegram-бот — вхід для персонального тренера. �
 import asyncio
 import datetime
 import logging
+import pathlib
 
 from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
@@ -67,6 +68,23 @@ async def on_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(INFO_TEXT_TEMPLATE.format(name=BOT_NAME))
 
 
+async def _send_exercise_gifs(update: Update, trace: list) -> None:
+    """Агент цикл текстовий (не може сам прикріпити зображення) — тому після
+    відповіді окремо надсилаємо гіфку для кожної вправи, яку він щойно
+    подивився через get_exercise_details."""
+    sent = set()
+    for step in trace:
+        if step["tool"] != "get_exercise_details" or step.get("failed"):
+            continue
+        output = step["output"]
+        gif_path = output.get("gif_path")
+        if not gif_path or gif_path in sent or not pathlib.Path(gif_path).exists():
+            continue
+        sent.add(gif_path)
+        with open(gif_path, "rb") as f:
+            await update.message.reply_animation(f, caption=output.get("name"))
+
+
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     text = update.message.text
@@ -76,6 +94,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         log.warning("outcome=%s chat_id=%s query=%r", result["outcome"], chat_id, text)
 
     await update.message.reply_text(result["answer"])
+    await _send_exercise_gifs(update, result.get("trace", []))
 
 
 async def on_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,0 +1,19 @@
+name: Deploy personal trainer bot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "module1personalAgent/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and run deploy.sh on the server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: /opt/AI_AGENTS/module1personalAgent/deploy/deploy.sh

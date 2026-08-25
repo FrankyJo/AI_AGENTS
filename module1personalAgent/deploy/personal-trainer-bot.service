@@ -1,0 +1,16 @@
+[Unit]
+Description=Personal Trainer Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trainerbot
+Group=trainerbot
+WorkingDirectory=/opt/AI_AGENTS/module1personalAgent
+ExecStart=/opt/AI_AGENTS/module1personalAgent/.venv/bin/python -m bot.telegram_bot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

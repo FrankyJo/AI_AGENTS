@@ -1,87 +1,96 @@
 """
-База вправ. Детермінований список — джерело правди для агента: він зобов'язаний
+База вправ — завантажується з exercises-dataset/data/exercises.json (1324
+вправи з описом і гіфкою кожна). Джерело правди для агента: він зобов'язаний
 брати вправи звідси, а не вигадувати (див. list_exercises у backend.py).
 
-contraindications — теги зон/травм, за яких вправа виключається з видачі
-list_exercises. Теги збігаються з тими, що використовує add_constraint:
-lower_back, knee, shoulder, neck, wrist, elbow, ankle, hip.
+Датасет не має власного contraindications — теги зон/травм (lower_back, knee,
+shoulder, neck, wrist, elbow, ankle, hip; ті самі, що використовує
+add_constraint) виводяться ТУТ евристикою за body_part/target/secondary_muscles
+(_infer_contraindications). Це наближення, не медичний огляд: воно ловить
+очевидні механічні зв'язки (жим лежачи -> плече, присід -> коліно, тяга з
+прямими ногами -> поперек через secondary_muscles), але не замінює здоровий
+глузд. Якщо для конкретної травми список виглядає підозріло — краще
+перевірити вручну й підправити мапінг нижче.
 """
 
-EXERCISES = [
-    {"name": "Присідання зі штангою", "muscle_group": "ноги",
-     "equipment": ["штанга", "стійки"], "contraindications": ["lower_back", "knee"]},
-    {"name": "Гоблет-присід з гантеллю", "muscle_group": "ноги",
-     "equipment": ["гантель"], "contraindications": ["knee"]},
-    {"name": "Присід у машині Сміта", "muscle_group": "ноги",
-     "equipment": ["машина сміта"], "contraindications": ["lower_back"]},
-    {"name": "Жим ногами в тренажері", "muscle_group": "ноги",
-     "equipment": ["тренажер"], "contraindications": ["knee"]},
-    {"name": "Румунська тяга зі штангою", "muscle_group": "ноги",
-     "equipment": ["штанга"], "contraindications": ["lower_back"]},
-    {"name": "Згинання ніг лежачи в тренажері", "muscle_group": "ноги",
-     "equipment": ["тренажер"], "contraindications": []},
-    {"name": "Розгинання ніг у тренажері", "muscle_group": "ноги",
-     "equipment": ["тренажер"], "contraindications": ["knee"]},
-    {"name": "Випади з гантелями", "muscle_group": "ноги",
-     "equipment": ["гантелі"], "contraindications": ["knee"]},
-    {"name": "Підйом на носки стоячи", "muscle_group": "ноги",
-     "equipment": ["тренажер"], "contraindications": ["ankle"]},
+import json
+import pathlib
 
-    {"name": "Станова тяга класична", "muscle_group": "спина",
-     "equipment": ["штанга"], "contraindications": ["lower_back"]},
-    {"name": "Тяга штанги в нахилі", "muscle_group": "спина",
-     "equipment": ["штанга"], "contraindications": ["lower_back"]},
-    {"name": "Тяга верхнього блоку до грудей", "muscle_group": "спина",
-     "equipment": ["блочний тренажер"], "contraindications": ["shoulder"]},
-    {"name": "Тяга горизонтального блоку", "muscle_group": "спина",
-     "equipment": ["блочний тренажер"], "contraindications": ["lower_back"]},
-    {"name": "Підтягування", "muscle_group": "спина",
-     "equipment": ["турнік"], "contraindications": ["shoulder"]},
-    {"name": "Гіперекстензія", "muscle_group": "спина",
-     "equipment": ["лава для гіперекстензії"], "contraindications": ["lower_back"]},
+DATASET_ROOT = pathlib.Path(__file__).resolve().parent.parent / "exercises-dataset"
+DATASET_PATH = DATASET_ROOT / "data" / "exercises.json"
 
-    {"name": "Жим штанги лежачи", "muscle_group": "груди",
-     "equipment": ["штанга", "лава"], "contraindications": ["shoulder"]},
-    {"name": "Жим гантелей на похилій лаві", "muscle_group": "груди",
-     "equipment": ["гантелі", "лава"], "contraindications": ["shoulder"]},
-    {"name": "Віджимання від підлоги", "muscle_group": "груди",
-     "equipment": [], "contraindications": ["wrist", "shoulder"]},
-    {"name": "Зведення рук у кросовері", "muscle_group": "груди",
-     "equipment": ["кросовер"], "contraindications": ["shoulder"]},
+# body_part -> наш bucket для фільтра list_exercises(muscle_group=...)
+BODY_PART_TO_MUSCLE_GROUP = {
+    "плечова частина рук": "руки",
+    "передпліччя": "руки",
+    "стегна": "ноги",
+    "гомілки": "ноги",
+    "спина": "спина",
+    "талія": "кор",
+    "груди": "груди",
+    "плечі": "плечі",
+    "кардіо": "кардіо",
+    "шия": "шия",
+}
 
-    {"name": "Жим гантелей сидячи", "muscle_group": "плечі",
-     "equipment": ["гантелі"], "contraindications": ["shoulder"]},
-    {"name": "Махи гантелями в сторони", "muscle_group": "плечі",
-     "equipment": ["гантелі"], "contraindications": ["shoulder"]},
-    {"name": "Махи гантелями в нахилі (задня дельта)", "muscle_group": "плечі",
-     "equipment": ["гантелі"], "contraindications": ["lower_back", "shoulder"]},
+# кардіо-тренажери, що фактично навантажують поперек (веслування), а не коліно
+_ROWING_EQUIPMENT = {"веслувальний тренажер", "гребний тренажер", "ергометр для верхньої частини тіла"}
 
-    {"name": "Підйом штанги на біцепс", "muscle_group": "руки",
-     "equipment": ["штанга"], "contraindications": ["wrist", "elbow"]},
-    {"name": "Молотки з гантелями", "muscle_group": "руки",
-     "equipment": ["гантелі"], "contraindications": ["elbow"]},
-    {"name": "Французький жим з гантеллю", "muscle_group": "руки",
-     "equipment": ["гантель"], "contraindications": ["elbow", "shoulder"]},
-    {"name": "Віджимання на брусах", "muscle_group": "руки",
-     "equipment": ["бруси"], "contraindications": ["shoulder", "elbow"]},
-    {"name": "Розгинання рук на блоці", "muscle_group": "руки",
-     "equipment": ["блочний тренажер"], "contraindications": ["elbow"]},
 
-    {"name": "Планка", "muscle_group": "кор",
-     "equipment": [], "contraindications": ["wrist"]},
-    {"name": "Скручування на прес", "muscle_group": "кор",
-     "equipment": [], "contraindications": ["lower_back", "neck"]},
-    {"name": "Підйом ніг у висі", "muscle_group": "кор",
-     "equipment": ["турнік"], "contraindications": ["lower_back", "shoulder"]},
-    {"name": "Дроворуб на блоці", "muscle_group": "кор",
-     "equipment": ["блочний тренажер"], "contraindications": ["lower_back"]},
+def _infer_contraindications(ex: dict) -> list:
+    body_part = ex["body_part"]
+    target = ex["target"]
+    secondary = set(ex.get("secondary_muscles", []))
+    tags = set()
 
-    {"name": "Ходьба на біговій доріжці", "muscle_group": "кардіо",
-     "equipment": ["доріжка"], "contraindications": ["knee"]},
-    {"name": "Велотренажер", "muscle_group": "кардіо",
-     "equipment": ["велотренажер"], "contraindications": ["knee"]},
-    {"name": "Гребний тренажер", "muscle_group": "кардіо",
-     "equipment": ["гребний тренажер"], "contraindications": ["lower_back"]},
-    {"name": "Еліптичний тренажер", "muscle_group": "кардіо",
-     "equipment": ["еліптичний тренажер"], "contraindications": []},
-]
+    if body_part == "груди" or body_part == "плечі":
+        tags.add("shoulder")
+    elif body_part == "плечова частина рук":
+        tags.add("elbow")
+    elif body_part == "передпліччя":
+        tags.add("wrist")
+    elif body_part == "гомілки":
+        tags.add("ankle")
+    elif body_part == "спина":
+        tags.add("lower_back")
+        if "обертальна манжета плеча" in secondary or "плеч" in ex.get("muscle_group", ""):
+            tags.add("shoulder")
+    elif body_part == "талія":
+        tags.add("lower_back")
+    elif body_part == "шия":
+        tags.add("neck")
+    elif body_part == "стегна":
+        if target == "glutes":
+            tags.add("hip")
+        else:                                       # quads, hamstrings, adductors, abductors
+            tags.add("knee")
+    elif body_part == "кардіо":
+        tags.add("lower_back" if ex.get("equipment") in _ROWING_EQUIPMENT else "knee")
+
+    if "поперек" in secondary:                       # напр. тяга/розгинання на прямих ногах
+        tags.add("lower_back")
+
+    return sorted(tags)
+
+
+def _load_exercises() -> list:
+    raw = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
+    exercises = []
+    for ex in raw:
+        gif_path = DATASET_ROOT / ex["gif_url"]
+        image_path = DATASET_ROOT / ex["image"]
+        exercises.append({
+            "name": ex["name"],
+            "muscle_group": BODY_PART_TO_MUSCLE_GROUP.get(ex["body_part"], ex["body_part"]),
+            "equipment": [ex["equipment"]],
+            "contraindications": _infer_contraindications(ex),
+            "target": ex["target"],
+            "description": ex["instructions"]["uk"],
+            "steps": ex["instruction_steps"]["uk"],
+            "gif_path": str(gif_path) if gif_path.exists() else None,
+            "image_path": str(image_path) if image_path.exists() else None,
+        })
+    return exercises
+
+
+EXERCISES = _load_exercises()

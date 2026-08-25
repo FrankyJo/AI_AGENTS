@@ -63,11 +63,51 @@ class TestAgentLoop(unittest.TestCase):
 
     def test_add_constraint_filters_list_exercises(self):
         """Записане обмеження одразу виключає небезпечні вправи з list_exercises."""
-        backend.add_constraint("lower_back", "тягне при нахилах")
-        result = backend.list_exercises(muscle_group="ноги")
+        fixture = [
+            {"name": "Присідання зі штангою", "muscle_group": "ноги",
+             "equipment": ["штанга"], "contraindications": ["lower_back", "knee"]},
+            {"name": "Розгинання ніг у тренажері", "muscle_group": "ноги",
+             "equipment": ["тренажер"], "contraindications": ["knee"]},
+        ]
+        with patch.object(backend, "EXERCISES", fixture):
+            backend.add_constraint("lower_back", "тягне при нахилах")
+            result = backend.list_exercises(muscle_group="ноги")
+
         names = [e["name"] for e in result["exercises"]]
         self.assertNotIn("Присідання зі штангою", names)
+        self.assertIn("Розгинання ніг у тренажері", names)
         self.assertIn("Присідання зі штангою", result["excluded_due_to_constraints"])
+
+    def test_list_exercises_respects_limit_and_reports_total(self):
+        """Датасет великий -> список обрізається лімітом, але total_matching каже скільки насправді підходить."""
+        fixture = [{"name": f"Вправа {i}", "muscle_group": "ноги", "equipment": ["штанга"],
+                    "contraindications": []} for i in range(5)]
+        with patch.object(backend, "EXERCISES", fixture):
+            result = backend.list_exercises(muscle_group="ноги", limit=2)
+        self.assertEqual(len(result["exercises"]), 2)
+        self.assertEqual(result["total_matching"], 5)
+
+    def test_list_exercises_caps_limit_at_max(self):
+        """Модель попросила limit=999 -> все одно не більше LIST_EXERCISES_MAX_LIMIT, щоб не роздути контекст."""
+        fixture = [{"name": f"Вправа {i}", "muscle_group": "ноги", "equipment": [],
+                    "contraindications": []} for i in range(50)]
+        with patch.object(backend, "EXERCISES", fixture):
+            result = backend.list_exercises(muscle_group="ноги", limit=999)
+        self.assertEqual(len(result["exercises"]), backend.LIST_EXERCISES_MAX_LIMIT)
+
+    def test_get_exercise_details_returns_description_and_gif_path(self):
+        fixture = [{"name": "Присідання зі штангою", "muscle_group": "ноги", "target": "quads",
+                    "equipment": ["штанга"], "contraindications": ["knee"],
+                    "description": "текст", "steps": ["крок 1"],
+                    "gif_path": "/tmp/fake.gif", "image_path": "/tmp/fake.jpg"}]
+        with patch.object(backend, "EXERCISES", fixture):
+            result = backend.get_exercise_details("Присідання зі штангою")
+        self.assertEqual(result["gif_path"], "/tmp/fake.gif")
+        self.assertEqual(result["steps"], ["крок 1"])
+
+    def test_get_exercise_details_unknown_name_returns_error(self):
+        result = backend.get_exercise_details("Вигадана вправа, якої нема")
+        self.assertEqual(result, {"error": "exercise_not_found", "name": "Вигадана вправа, якої нема"})
 
     def test_swap_exercise_unknown_day_is_tracked_not_swallowed(self):
         """Інструмент повернув {'error': ...} на неіснуючий день -> крок позначено failed."""

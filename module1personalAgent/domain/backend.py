@@ -117,7 +117,20 @@ def remove_constraint(tag: str) -> dict:
 
 
 # ── база вправ ────────────────────────────────────────────────
-def list_exercises(muscle_group: str = None, equipment: str = None) -> dict:
+# датасет великий (1324 вправи) — list_exercises віддає короткі картки й
+# обрізає видачу, щоб один виклик не роздув контекст/вартість прогону;
+# повний опис+гіфка для КОНКРЕТНОЇ вправи — окремо через get_exercise_details.
+LIST_EXERCISES_DEFAULT_LIMIT = 15
+LIST_EXERCISES_MAX_LIMIT = 30
+
+
+def _compact(e: dict) -> dict:
+    return {"name": e["name"], "muscle_group": e["muscle_group"],
+            "equipment": e["equipment"], "contraindications": e["contraindications"]}
+
+
+def list_exercises(muscle_group: str = None, equipment: str = None,
+                    limit: int = LIST_EXERCISES_DEFAULT_LIMIT) -> dict:
     banned = _constraint_tags()
     items = EXERCISES
     if muscle_group:
@@ -125,8 +138,23 @@ def list_exercises(muscle_group: str = None, equipment: str = None) -> dict:
     if equipment:
         items = [e for e in items if equipment in e["equipment"]]
     safe = [e for e in items if not (banned & set(e["contraindications"]))]
-    excluded = [e["name"] for e in items if banned & set(e["contraindications"])]
-    return {"exercises": safe, "excluded_due_to_constraints": excluded}
+    excluded_names = [e["name"] for e in items if banned & set(e["contraindications"])]
+
+    limit = max(1, min(limit, LIST_EXERCISES_MAX_LIMIT))
+    return {"exercises": [_compact(e) for e in safe[:limit]],
+            "total_matching": len(safe),
+            "excluded_due_to_constraints": excluded_names[:limit],
+            "excluded_total": len(excluded_names)}
+
+
+def get_exercise_details(name: str) -> dict:
+    for e in EXERCISES:
+        if e["name"] == name:
+            return {"name": e["name"], "muscle_group": e["muscle_group"], "target": e["target"],
+                    "equipment": e["equipment"], "description": e["description"], "steps": e["steps"],
+                    "contraindications": e["contraindications"],
+                    "gif_path": e["gif_path"], "image_path": e["image_path"]}
+    return {"error": "exercise_not_found", "name": name}
 
 
 # ── програма тренувань ──────────────────────────────────────
@@ -243,6 +271,7 @@ IMPL = {
     "finish_exercise_set_log": finish_exercise_set_log,
     "update_body_metrics": update_body_metrics,
     "get_exercise_history": get_exercise_history,
+    "get_exercise_details": get_exercise_details,
 }
 
 
@@ -295,15 +324,31 @@ TOOL_SCHEMAS = {
         ["tag"]),
     "list_exercises": _schema(
         "list_exercises",
-        "Повертає вправи з бази, ВЖЕ відфільтровані за поточними обмеженнями "
-        "профілю (небезпечні при травмах користувача виключені й перелічені "
-        "окремо в excluded_due_to_constraints). Використовуй, щоб підібрати "
-        "вправи для нової програми або знайти заміну — не вигадуй вправи, "
-        "яких немає в цьому списку.",
+        "Повертає короткі картки вправ (назва/група м'язів/обладнання) з бази "
+        "1324 вправ, ВЖЕ відфільтровані за поточними обмеженнями профілю "
+        "(небезпечні при травмах користувача виключені й перелічені окремо в "
+        "excluded_due_to_constraints, з кількістю у excluded_total). Видача "
+        "обрізається лімітом (total_matching показує скільки насправді "
+        "підходить) — звужуй muscle_group/equipment, а не намагайся отримати "
+        "все одразу. Використовуй, щоб підібрати вправи для програми чи "
+        "заміни — не вигадуй вправи, яких немає в цьому списку. Щоб отримати "
+        "повний опис і гіфку конкретної вправи — get_exercise_details.",
         {"muscle_group": {"type": "string",
-                            "description": "Група м'язів: ноги, спина, груди, плечі, руки, кор, кардіо"},
-         "equipment": {"type": "string", "description": "Фільтр за конкретним обладнанням"}},
+                            "description": "Група м'язів: ноги, спина, груди, плечі, руки, кор, кардіо, шия"},
+         "equipment": {"type": "string", "description": "Фільтр за конкретним обладнанням"},
+         "limit": {"type": "integer",
+                    "description": f"Скільки вправ повернути (типово {LIST_EXERCISES_DEFAULT_LIMIT}, "
+                                    f"максимум {LIST_EXERCISES_MAX_LIMIT})"}},
         []),
+    "get_exercise_details": _schema(
+        "get_exercise_details",
+        "Повертає повний опис вправи (покроково) і шлях до гіфки/фото — "
+        "викликай ПЕРЕД тим як пропонуєш користувачу зробити конкретну вправу "
+        "прямо зараз (наживо, у процесі тренування), щоб бот міг показати "
+        "техніку і прикріпити гіфку. Не викликай для кожної вправи в усій "
+        "програмі одразу — лише для тієї, яку користувач буде робити зараз.",
+        {"name": {"type": "string", "description": "Точна назва вправи, як у list_exercises"}},
+        ["name"]),
     "get_program": _schema(
         "get_program", "Повертає поточну збережену програму тренувань користувача.",
         {}, []),

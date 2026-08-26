@@ -85,6 +85,21 @@
     font-size: 14px; margin-bottom: var(--sp-3); -webkit-appearance: none; appearance: none;
   }
 
+  .range-presets { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+  .range-btn {
+    flex: 1 1 auto; padding: var(--sp-2) var(--sp-3); border-radius: 999px;
+    border: 1px solid var(--card-border); background: var(--bg); color: var(--text);
+    font-size: 13px; font-family: inherit; cursor: pointer;
+  }
+  .range-btn.active { background: var(--link); border-color: var(--link); color: #fff; }
+  .range-custom { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+  .range-custom input[type="date"] {
+    flex: 1 1 0; min-width: 0; padding: var(--sp-2); border-radius: 10px;
+    border: 1px solid var(--card-border); background: var(--bg); color: var(--text);
+    font-size: 13px; font-family: inherit;
+  }
+  .range-custom span { color: var(--hint); font-size: 13px; }
+
   .day-block { margin-bottom: var(--sp-4); }
   .day-block:last-child { margin-bottom: 0; }
   .day-title {
@@ -172,14 +187,28 @@ function renderProgram(program) {
     </div>`;
 }
 
-function renderStats(totalWorkouts, volumeSeries) {
-  const totalKg = volumeSeries.reduce((s, v) => s + v.volume_kg, 0);
+const RANGE_PRESETS = [
+  { key: 'week', label: 'Тиждень' },
+  { key: 'month', label: 'Місяць' },
+  { key: 'year', label: 'Рік' },
+  { key: 'all', label: 'Весь час' },
+];
+
+function renderStats() {
   return `
     <div class="card">
-      <h2>Загальний тоннаж</h2>
+      <h2>Тоннаж за тренування</h2>
+      <div class="range-presets">
+        ${RANGE_PRESETS.map(r => `<button type="button" class="range-btn" data-range="${r.key}">${r.label}</button>`).join('')}
+      </div>
+      <div class="range-custom">
+        <input type="date" id="rangeFrom" aria-label="Від">
+        <span>—</span>
+        <input type="date" id="rangeTo" aria-label="До">
+      </div>
       <div class="stat-grid">
-        <div class="stat"><div class="value">${totalWorkouts}</div><div class="label">тренувань</div></div>
-        <div class="stat"><div class="value">${fmtTonnes(totalKg)} т</div><div class="label">піднято всього</div></div>
+        <div class="stat"><div class="value" id="statWorkouts">—</div><div class="label">тренувань</div></div>
+        <div class="stat"><div class="value" id="statTonnes">—</div><div class="label">піднято за період</div></div>
       </div>
       <canvas id="volumeChart" height="180"></canvas>
     </div>`;
@@ -197,10 +226,13 @@ function renderExerciseSection(names) {
     </div>`;
 }
 
+let volumeChart = null;
 function drawVolumeChart(series) {
   const ctx = document.getElementById('volumeChart');
-  if (!ctx || !series.length) return;
-  new Chart(ctx, {
+  if (!ctx) return;
+  if (volumeChart) { volumeChart.destroy(); volumeChart = null; }
+  if (!series.length) return;
+  volumeChart = new Chart(ctx, {
     type: 'line',
     data: {
       labels: series.map(v => v.date),
@@ -210,6 +242,58 @@ function drawVolumeChart(series) {
     },
     options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
   });
+}
+
+function isoDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function presetRangeBounds(key) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (key === 'week') return { from: isoDaysAgo(7), to: today };
+  if (key === 'month') return { from: isoDaysAgo(30), to: today };
+  if (key === 'year') return { from: isoDaysAgo(365), to: today };
+  return { from: '', to: '' };                      // 'all'
+}
+
+function filterSeriesByRange(series, from, to) {
+  return series.filter(v => (!from || v.date >= from) && (!to || v.date <= to));
+}
+
+function renderRangeStats(series) {
+  const totalKg = series.reduce((s, v) => s + v.volume_kg, 0);
+  document.getElementById('statWorkouts').textContent = series.length;
+  document.getElementById('statTonnes').textContent = fmtTonnes(totalKg) + ' т';
+}
+
+function applyRange(volumeSeries, from, to) {
+  const filtered = filterSeriesByRange(volumeSeries, from, to);
+  renderRangeStats(filtered);
+  drawVolumeChart(filtered);
+}
+
+function setupRangeControls(volumeSeries) {
+  const fromInput = document.getElementById('rangeFrom');
+  const toInput = document.getElementById('rangeTo');
+  const buttons = document.querySelectorAll('.range-btn');
+
+  const selectPreset = (key) => {
+    buttons.forEach(b => b.classList.toggle('active', b.dataset.range === key));
+    const { from, to } = presetRangeBounds(key);
+    fromInput.value = from;
+    toInput.value = to;
+    applyRange(volumeSeries, from, to);
+  };
+
+  buttons.forEach(b => b.addEventListener('click', () => selectPreset(b.dataset.range)));
+  [fromInput, toInput].forEach(input => input.addEventListener('change', () => {
+    buttons.forEach(b => b.classList.remove('active'));   // кастомний період -> жоден пресет не активний
+    applyRange(volumeSeries, fromInput.value, toInput.value);
+  }));
+
+  selectPreset('all');                                     // початковий вигляд — уся історія
 }
 
 let exerciseChart = null;
@@ -264,12 +348,12 @@ async function load() {
 
   const names = Object.keys(data.exercise_progression);
   document.getElementById('content').innerHTML =
-    renderStats(data.total_workouts, data.volume_series) +
+    renderStats() +
     renderExerciseSection(names) +
     renderProfile(data.profile) +
     renderProgram(data.program);
 
-  drawVolumeChart(data.volume_series);
+  setupRangeControls(data.volume_series);
   if (names.length) {
     drawExerciseChart(data.exercise_progression[names[0]]);
     document.getElementById('exerciseSelect').addEventListener('change', (e) => {

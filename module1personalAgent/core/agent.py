@@ -42,7 +42,7 @@ def _track(model, usage):
     m["out"] += u["out"]
     m["cache_write"] += u["cache_write"]
     m["cache_read"] += u["cache_read"]
-љ
+
 
 def reset_usage():
     USAGE.update({"calls": 0, "in": 0, "out": 0, "cache_write": 0, "cache_read": 0, "by_model": {}})

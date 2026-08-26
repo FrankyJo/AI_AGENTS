@@ -64,14 +64,29 @@ class TestUsageLog(unittest.TestCase):
 
         total = cost.aggregate(records)
 
-        self.assertEqual(total["claude-sonnet-4-6"], {"calls": 2, "in": 300, "out": 90})
-        self.assertEqual(total["claude-haiku-4-5-20251001"], {"calls": 1, "in": 30, "out": 10})
+        self.assertEqual(total["claude-sonnet-4-6"],
+                          {"calls": 2, "in": 300, "out": 90, "cache_write": 0, "cache_read": 0})
+        self.assertEqual(total["claude-haiku-4-5-20251001"],
+                          {"calls": 1, "in": 30, "out": 10, "cache_write": 0, "cache_read": 0})
 
     def test_aggregate_then_usd_matches_known_price(self):
         """1M вхідних + 1M вихідних токенів sonnet -> $3.00 + $15.00 за прайсом з core/cost.py."""
         records = [{"by_model": {"claude-sonnet-4-6": {"calls": 1, "in": 1_000_000, "out": 1_000_000}}}]
         total = cost.aggregate(records)
         self.assertAlmostEqual(cost.usd(total), 3.00 + 15.00)
+
+    def test_cache_write_costs_more_than_plain_input(self):
+        """Запис у кеш дорожчий за звичайний input (1.25x) — інакше немає сенсу
+        відрізняти його від звичайного in."""
+        plain = cost.usd({"claude-sonnet-4-6": {"in": 1_000_000, "out": 0}})
+        cache_write = cost.usd({"claude-sonnet-4-6": {"in": 0, "out": 0, "cache_write": 1_000_000}})
+        self.assertAlmostEqual(cache_write, plain * 1.25)
+
+    def test_cache_read_costs_a_tenth_of_plain_input(self):
+        """Читання з кешу — головна економія від prompt caching: ~10% ціни звичайного input."""
+        plain = cost.usd({"claude-sonnet-4-6": {"in": 1_000_000, "out": 0}})
+        cache_read = cost.usd({"claude-sonnet-4-6": {"in": 0, "out": 0, "cache_read": 1_000_000}})
+        self.assertAlmostEqual(cache_read, plain * 0.1)
 
 
 if __name__ == "__main__":

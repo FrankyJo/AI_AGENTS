@@ -51,15 +51,45 @@ class TestAgentLoop(unittest.TestCase):
         self.assertEqual(profile["name"], "Денис")
         self.assertEqual(backend.get_profile()["name"], "Денис")
 
-    def test_run_agent_injects_todays_date_into_system_prompt(self):
-        """Модель має знати, яке сьогодні число — інакше вгадує рік у log_workout/log_set."""
+    def test_run_agent_system_is_cacheable_and_unchanged(self):
+        """system лишається дослівно тим самим рядком (без дати/нотаток) і
+        позначений cache_control — інакше Anthropic prompt caching не зможе
+        перевикористовувати незмінний префікс system+tools і кожен запит
+        платив би повну ціну заново."""
         responses = [fake_resp([text_block("ok")], "end_turn")]
         with patch.object(agent, "_call", side_effect=responses) as mock_call:
             agent.run_agent(system="базовий промпт", tools=[], query="test")
 
         sent_system = mock_call.call_args.kwargs["system"]
-        self.assertIn(datetime.date.today().isoformat(), sent_system)
-        self.assertIn("базовий промпт", sent_system)
+        self.assertEqual(sent_system, [{"type": "text", "text": "базовий промпт",
+                                         "cache_control": {"type": "ephemeral"}}])
+
+    def test_run_agent_puts_date_and_context_in_the_message_not_system(self):
+        """Дата й персональні нотатки — динамічні, тому йдуть у перше
+        повідомлення, а не в system (інакше кожен користувач зривав би кеш
+        для самого себе своїми унікальними нотатками)."""
+        responses = [fake_resp([text_block("ok")], "end_turn")]
+        with patch.object(agent, "_call", side_effect=responses) as mock_call:
+            agent.run_agent(system="base", tools=[], query="test", context="Хоче схуднути.")
+
+        sent_content = mock_call.call_args.kwargs["messages"][-1]["content"]
+        self.assertIn(datetime.date.today().isoformat(), sent_content)
+        self.assertIn("Хоче схуднути.", sent_content)
+        self.assertTrue(sent_content.endswith("test"))
+
+    def test_run_agent_caches_last_tool_without_mutating_original(self):
+        """cache_control на останньому інструменті кешує весь tools-масив —
+        але копія, а не мутація переданого списку/схем (вони спільні для всіх
+        користувачів)."""
+        tools = [{"name": "a"}, {"name": "b"}]
+        responses = [fake_resp([text_block("ok")], "end_turn")]
+        with patch.object(agent, "_call", side_effect=responses) as mock_call:
+            agent.run_agent(system="base", tools=tools, query="test")
+
+        sent_tools = mock_call.call_args.kwargs["tools"]
+        self.assertEqual(sent_tools[0], {"name": "a"})
+        self.assertEqual(sent_tools[1], {"name": "b", "cache_control": {"type": "ephemeral"}})
+        self.assertNotIn("cache_control", tools[1])              # оригінал не зіпсовано
 
     def test_run_agent_seeds_messages_with_prior_history(self):
         """Без цього репліка «так, вона» на другому повідомленні не має контексту,
@@ -74,13 +104,17 @@ class TestAgentLoop(unittest.TestCase):
         sent_messages = mock_call.call_args.kwargs["messages"]
         self.assertEqual(sent_messages[0], prior[0])
         self.assertEqual(sent_messages[1], prior[1])
-        self.assertEqual(sent_messages[2], {"role": "user", "content": "Так, вона"})
+        self.assertEqual(sent_messages[2]["role"], "user")
+        self.assertTrue(sent_messages[2]["content"].endswith("Так, вона"))
 
     def test_run_agent_without_history_starts_fresh(self):
         responses = [fake_resp([text_block("ok")], "end_turn")]
         with patch.object(agent, "_call", side_effect=responses) as mock_call:
             agent.run_agent(system="base", tools=[], query="test")
-        self.assertEqual(mock_call.call_args.kwargs["messages"], [{"role": "user", "content": "test"}])
+        messages = mock_call.call_args.kwargs["messages"]
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertTrue(messages[0]["content"].endswith("test"))
 
     def test_summarize_into_notes_noop_when_nothing_dropped(self):
         """Немає що сумаризувати -> старі нотатки повертаються без зайвого виклику API."""

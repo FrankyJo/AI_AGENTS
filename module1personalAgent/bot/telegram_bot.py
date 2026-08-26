@@ -41,15 +41,18 @@ def handle_query(chat_id: int, text: str, use_history: bool = True) -> dict:
     backend.set_chat_id(chat_id)
     reset_usage()
 
-    system = BASE_PROMPT
     history = None
+    context = None
     if use_history:
         history = backend.get_conversation()
-        notes = backend.get_memory_notes()
-        if notes:
-            system = f"{BASE_PROMPT}\n\nДовгострокові нотатки про користувача:\n{notes}"
+        context = backend.get_memory_notes() or None
 
-    result = run_agent(system=system, tools=backend.tools(), query=text, history=history)
+    # system — незмінний рядок для всіх користувачів (щоб Anthropic prompt
+    # caching перевикористовував незмінний префікс замість оплати його
+    # щоразу заново); персональне (нотатки, дата) run_agent сам додає окремо
+    # через context, а не сюди — див. docstring run_agent.
+    result = run_agent(system=BASE_PROMPT, tools=backend.tools(), query=text,
+                        history=history, context=context)
 
     if use_history:
         dropped = backend.append_conversation(text, result["answer"])
@@ -138,9 +141,12 @@ def _usage_section(title: str, records: list, cutoff: datetime.datetime) -> str:
     by_model = cost.aggregate(period)
     if not by_model:
         return f"{title}: викликів не було"
-    rows = "\n".join(
-        f"  {row['model']}: {row['calls']} викликів, {row['in']}→{row['out']} токенів, ${row['usd']:.4f}"
-        for row in cost.breakdown(by_model))
+    rows = []
+    for row in cost.breakdown(by_model):
+        cache_note = f", з кешу {row['cache_read']}" if row["cache_read"] else ""
+        rows.append(f"  {row['model']}: {row['calls']} викликів, {row['in']}→{row['out']} токенів"
+                     f"{cache_note}, ${row['usd']:.4f}")
+    rows = "\n".join(rows)
     return f"{title}: ${cost.usd(by_model):.4f}\n{rows}"
 
 

@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+out/
+qdrant_data/
+laws.db

@@ -1,0 +1,119 @@
+"""
+Telegram-бот поверх self-RAG воріт (self_rag.answer_with_gate).
+
+    python bot.py
+
+Long polling — не потрібен публічний HTTPS-сервер, достатньо запустити
+процес там, де є мережа (свій ноутбук, VPS, контейнер). Якщо бот піде в
+продакшн з великим навантаженням — тоді має сенс перейти на webhook, але
+для навчального прототипу polling простіший і достатній.
+
+answer_with_gate() синхронна (звичайний anthropic-клієнт, sentence-transformers,
+qdrant sync client) — виконується в окремому потоці через run_in_executor,
+щоб не блокувати asyncio event loop бота на час запиту (кілька секунд, а
+на WEAK-гілці з rewrite — довше).
+"""
+
+import asyncio
+import datetime
+import logging
+
+from telegram import Update
+from telegram.constants import ChatAction
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+
+from config import ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN
+from self_rag import answer_with_gate
+from watch import check_for_updates
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)     # придушити шумні debug-логи бібліотек
+logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+log = logging.getLogger("lawyer_bot")
+
+WELCOME = (
+    "Вітаю! Я консультую з питань права України — спираючись лише на "
+    "текст проіндексованих законів і кодексів, а не на власні здогадки.\n\n"
+    "Постав питання звичайним повідомленням, наприклад:\n"
+    "«Мене зупинив поліцейський без пояснення причини, це законно?»\n\n"
+    "Це навчальний прототип, а не офіційна юридична консультація."
+)
+TELEGRAM_LIMIT = 4000    # трохи менше за ліміт Telegram (4096) — про запас
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(WELCOME)
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.message.text
+    chat_id = update.effective_chat.id
+    log.info("chat=%s питання=%r", chat_id, query[:120])
+
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, answer_with_gate, query)
+        answer = result["answer"]
+    except Exception:
+        log.exception("Помилка обробки питання (chat=%s)", chat_id)
+        answer = ("Сталася технічна помилка під час обробки питання. "
+                 "Спробуйте, будь ласка, ще раз трохи пізніше.")
+
+    for i in range(0, len(answer), TELEGRAM_LIMIT):
+        await update.message.reply_text(answer[i:i + TELEGRAM_LIMIT])
+
+
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("Необроблена помилка в обробнику", exc_info=context.error)
+
+
+async def check_updates_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Раз на день: чи не вийшла нова редакція одного з відслідковуваних
+    законів. Лише сповіщає — переіндексація (python ingest.py --reset)
+    залишається ручним кроком, свідомо: законодавчі зміни варті перегляду
+    людиною, перш ніж міняти базу знань агента."""
+    log.info("Перевірка оновлень законодавства...")
+    loop = asyncio.get_running_loop()
+    try:
+        updates = await loop.run_in_executor(None, check_for_updates)
+    except Exception:
+        log.exception("Не вдалося перевірити оновлення")
+        return
+
+    for u in updates:
+        text = (f"Вийшла нова редакція: «{u['title']}»\n"
+               f"{u['old']} → {u['new']}\n{u['url']}\n\n"
+               f"Щоб оновити базу знань бота:  python ingest.py --reset")
+        log.info("Знайдено оновлення: %s", text.replace("\n", " | "))
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=text)
+
+
+def main() -> None:
+    if not TELEGRAM_BOT_TOKEN:
+        raise SystemExit(
+            "Не знайдено TELEGRAM_BOT_TOKEN.\n"
+            "  Отримайте токен у @BotFather (команда /newbot) і впишіть у .env"
+        )
+
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(on_error)
+
+    if ADMIN_CHAT_ID:
+        # час — локальний час сервера, де запущено процес
+        app.job_queue.run_daily(check_updates_job, time=datetime.time(hour=9, minute=0))
+        log.info("Щоденна перевірка оновлень увімкнена (09:00, сповіщення в chat_id=%s)",
+                 ADMIN_CHAT_ID)
+    else:
+        log.warning("ADMIN_CHAT_ID не задано — щоденна перевірка оновлень вимкнена")
+
+    log.info("Бот запущено (long polling). Ctrl+C — зупинити.")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()

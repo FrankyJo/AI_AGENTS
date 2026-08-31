@@ -55,7 +55,14 @@ def _dispatch(name: str, args: dict) -> dict:
 
 def run_agentic(query: str) -> dict:
     result = run_agent(
-        system=BASE_PROMPT + " Норми закону бери ТІЛЬКИ з search_kb — не вигадуй.",
+        system=BASE_PROMPT + (
+            " Норми закону бери ТІЛЬКИ з search_kb — не вигадуй. Перш ніж "
+            "сказати, що тема поза базою знань, ОБОВ'ЯЗКОВО зроби хоча б "
+            "один виклик search_kb — і лише якщо він справді нічого "
+            "релевантного не повернув, тоді чесно скажи, що в базі цього "
+            "немає. Ніколи не відмовляй одразу з власного припущення про "
+            "спеціалізацію."
+        ),
         tools=[SEARCH_KB_SCHEMA],
         query=query,
         dispatch=_dispatch,

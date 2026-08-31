@@ -59,6 +59,31 @@ WELCOME = (
 TELEGRAM_LIMIT = 4000    # трохи менше за ліміт Telegram (4096) — про запас
 
 
+def _split_for_telegram(text: str) -> list[str]:
+    """Ріже по абзацах (порожній рядок між ними), не посеред слова чи
+    речення — на відміну від сліпого answer[i:i+LIMIT]. Абзац, довший за
+    ліміт сам по собі (рідкість — модель зазвичай не пише такого суцільним
+    блоком), доводиться різати жорстко, інакше застрягне назавжди."""
+    chunks = []
+    current = ""
+    for para in text.split("\n\n"):
+        candidate = f"{current}\n\n{para}" if current else para
+        if len(candidate) <= TELEGRAM_LIMIT:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if len(para) <= TELEGRAM_LIMIT:
+            current = para
+        else:
+            for i in range(0, len(para), TELEGRAM_LIMIT):
+                chunks.append(para[i:i + TELEGRAM_LIMIT])
+            current = ""
+    if current:
+        chunks.append(current)
+    return chunks or [text]
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(WELCOME)
 
@@ -85,7 +110,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         result = await loop.run_in_executor(None, route_answer, query)
         answer = result["answer"]
         log.info("chat=%s конвеєр=%s", chat_id, result.get("pipeline"))
-        if result.get("outcome") not in (None, "ok"):
+        if result.get("outcome") == "truncated":
+            log.warning("chat=%s відповідь обрізана по MAX_TOKENS", chat_id)
+            answer += ("\n\n(Відповідь вийшла задовгою і обрізалась. Спробуйте "
+                      "запитати вужче — наприклад, про один конкретний аспект.)")
+        elif result.get("outcome") not in (None, "ok"):
             log.warning("chat=%s outcome=%s пошуки=%s", chat_id, result.get("outcome"),
                        result.get("kb_searches"))
     except Exception:
@@ -95,8 +124,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     finally:
         typing_task.cancel()
 
-    for i in range(0, len(answer), TELEGRAM_LIMIT):
-        await update.message.reply_text(answer[i:i + TELEGRAM_LIMIT])
+    for chunk in _split_for_telegram(answer):
+        await update.message.reply_text(chunk)
 
 
 async def usage_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

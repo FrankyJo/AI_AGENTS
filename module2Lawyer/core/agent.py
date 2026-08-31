@@ -68,6 +68,7 @@ def ask(system: str, query: str, fast: bool = False, max_tokens: int | None = No
     if fast:
         return text
     return {"answer": text,
+            "outcome": "truncated" if resp.stop_reason == "max_tokens" else "ok",
             "usage": {"input_tokens": resp.usage.input_tokens,
                       "output_tokens": resp.usage.output_tokens}}
 
@@ -96,8 +97,15 @@ def run_agent(system: str, tools: list, query: str, dispatch, on_step=None) -> d
         tool_uses = [b for b in resp.content if b.type == "tool_use"]
 
         if resp.stop_reason != "tool_use":                     # фінальна відповідь
-            text = "".join(b.text for b in resp.content if b.type == "text")
-            return {"answer": text.strip(), "outcome": "ok", "trace": trace, "turns": turn + 1}
+            text = "".join(b.text for b in resp.content if b.type == "text").strip()
+            if resp.stop_reason == "max_tokens":
+                # модель реально впиралась в MAX_TOKENS і зупинилась на
+                # півслові — раніше це мовчки віддавалося як "outcome: ok",
+                # ніби відповідь повна. Позначаємо чесно, аби виклик (bot.py)
+                # міг попередити користувача, а не видати обрізаний текст
+                # за завершену відповідь.
+                return {"answer": text, "outcome": "truncated", "trace": trace, "turns": turn + 1}
+            return {"answer": text, "outcome": "ok", "trace": trace, "turns": turn + 1}
 
         results = []
         for tu in tool_uses:

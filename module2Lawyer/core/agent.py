@@ -16,11 +16,11 @@ from config import API_KEY, MODEL, MODEL_FAST, MAX_TOKENS, MAX_TURNS
 
 client = Anthropic(api_key=API_KEY)
 
-USAGE = {"calls": 0, "in": 0, "out": 0}
+USAGE = {"calls": 0, "in": 0, "out": 0, "by_model": {}}    # by_model — для core/cost.py (ціни різні для MODEL/MODEL_FAST)
 
 
 def reset_usage():
-    USAGE.update({"calls": 0, "in": 0, "out": 0})
+    USAGE.update({"calls": 0, "in": 0, "out": 0, "by_model": {}})
 
 
 def _call(**kwargs):
@@ -31,6 +31,10 @@ def _call(**kwargs):
             USAGE["calls"] += 1
             USAGE["in"] += resp.usage.input_tokens
             USAGE["out"] += resp.usage.output_tokens
+            m = USAGE["by_model"].setdefault(kwargs["model"], {"calls": 0, "in": 0, "out": 0})
+            m["calls"] += 1
+            m["in"] += resp.usage.input_tokens
+            m["out"] += resp.usage.output_tokens
             return resp
         except APIStatusError as e:
             if e.status_code in (429, 500, 529) and attempt < 2:

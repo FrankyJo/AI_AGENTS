@@ -37,6 +37,8 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from config import ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN
+from core import cost
+from core.agent import USAGE
 from router import answer as route_answer
 from watch import check_for_updates
 
@@ -44,6 +46,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)     # придушити шумні debug-логи бібліотек
 logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 log = logging.getLogger("lawyer_bot")
+
+START_TIME = datetime.datetime.now()    # для /usage — "з моменту запуску процесу"
 
 WELCOME = (
     "Вітаю! Я консультую з питань права України — спираючись лише на "
@@ -95,6 +99,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text(answer[i:i + TELEGRAM_LIMIT])
 
 
+async def usage_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Витрати з моменту запуску процесу — токени й $ по кожній моделі
+    окремо (MODEL/MODEL_FAST мають різну ціну, core/cost.py). Лише
+    ADMIN_CHAT_ID, якщо заданий — не бізнес-дані користувачів, але й не
+    те, що варто світити будь-кому, хто напише боту команду."""
+    chat_id = update.effective_chat.id
+    if ADMIN_CHAT_ID and str(chat_id) != str(ADMIN_CHAT_ID):
+        await update.message.reply_text("Ця команда доступна лише адміністратору бота.")
+        return
+
+    by_model = USAGE["by_model"]
+    if not by_model:
+        await update.message.reply_text(
+            f"Ще жодного виклику моделі з моменту запуску процесу "
+            f"({START_TIME:%d.%m.%Y %H:%M}).")
+        return
+
+    lines = [f"Витрати з моменту запуску процесу ({START_TIME:%d.%m.%Y %H:%M}):\n"]
+    for row in cost.breakdown(by_model):
+        lines.append(f"{row['model']}\n"
+                     f"  викликів: {row['calls']}  вх: {row['in']}  вих: {row['out']}  "
+                     f"${row['usd']:.4f}")
+    lines.append(f"\nУсього: {USAGE['calls']} викликів, "
+                 f"{USAGE['in']}+{USAGE['out']} токенів, ${cost.usd(by_model):.4f}")
+    await update.message.reply_text("\n".join(lines))
+
+
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Необроблена помилка в обробнику", exc_info=context.error)
 
@@ -130,6 +161,7 @@ def main() -> None:
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("usage", usage_cmd))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_error_handler(on_error)
 

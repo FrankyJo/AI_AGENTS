@@ -16,8 +16,14 @@ if not API_KEY:
 
 MODEL      = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")            # основна відповідь
 MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5-20251001")  # grade, rewrite, agentic-крок
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", 800))
-MAX_TURNS  = int(os.getenv("MAX_TURNS", 6))    # ліміт кроків для tool-use циклу (etap 2b)
+# bot.py тепер на agentic RAG (run_agentic) за замовчуванням — складене
+# питання може дати 4-5 окремих search_kb + фінальну відповідь із
+# кількома розділами (реальний приклад — README). 800/6 було розраховано
+# на static RAG, тут замало: 800 токенів ризикує обрізати структуровану
+# відповідь, 6 turns — рівно межа для 5 пошуків + 1 фінальний крок, без
+# запасу на складніше питання.
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", 1200))
+MAX_TURNS  = int(os.getenv("MAX_TURNS", 8))    # ліміт кроків для tool-use циклу (etap 2b)
 
 # Потрібні лише для bot.py. Необов'язкові тут (щоб CLI-скрипти й далі
 # працювали без них) — bot.py сам перевірить і впаде з ясним повідомленням.

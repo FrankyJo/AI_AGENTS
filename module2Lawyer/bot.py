@@ -1,5 +1,5 @@
 """
-Telegram-бот поверх self-RAG воріт (self_rag.answer_with_gate).
+Telegram-бот поверх agentic RAG (rag_agentic.run_agentic).
 
     python bot.py
 
@@ -8,10 +8,24 @@ Long polling — не потрібен публічний HTTPS-сервер, д
 продакшн з великим навантаженням — тоді має сенс перейти на webhook, але
 для навчального прототипу polling простіший і достатній.
 
-answer_with_gate() синхронна (звичайний anthropic-клієнт, sentence-transformers,
-qdrant sync client) — виконується в окремому потоці через run_in_executor,
-щоб не блокувати asyncio event loop бота на час запиту (кілька секунд, а
-на WEAK-гілці з rewrite — довше).
+Було: self_rag.answer_with_gate() — один retrieval (+ один rewrite на
+WEAK). Дешевше, але на складених питаннях (кілька різних аспектів в
+одному запиті) губиться й ескалює людині, хоча потрібні норми є в базі
+— просто жоден одиничний пошук не піднімає їх усі разом (реальний кейс —
+README, розділ «Реальний кейс: чому self_rag ескалює, а agentic — ні»).
+
+Зараз: router.answer() — дешевий класифікатор (просте/складене питання)
+вирішує, куди йти: просте → self_rag (1-2 виклики моделі, швидко),
+складене → одразу agentic (модель сама шукає, скільки треба). Якщо
+класифікатор помилився і self_rag усе одно ескалював — остання спроба
+через agentic перш ніж чесно відмовляти (router.py).
+
+Синхронний виклик router.answer() виконується в окремому потоці через
+run_in_executor, щоб не блокувати asyncio event loop бота. На складеному
+питанні (кілька послідовних викликів моделі, кожен пошук — окремий turn)
+відповідь може займати 5-30+ секунд — індикатор "друкує..." оновлюється
+кожні 4с окремою задачею (`_keep_typing`), інакше Telegram гасить його
+вже через ~5с.
 """
 
 import asyncio
@@ -23,7 +37,7 @@ from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from config import ADMIN_CHAT_ID, TELEGRAM_BOT_TOKEN
-from self_rag import answer_with_gate
+from router import answer as route_answer
 from watch import check_for_updates
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -45,21 +59,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(WELCOME)
 
 
+async def _keep_typing(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    """Telegram гасить "друкує..." вже за ~5с — agentic-відповідь із
+    кількома пошуками часто довша, тому оновлюємо, поки триває обробка."""
+    try:
+        while True:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.message.text
     chat_id = update.effective_chat.id
     log.info("chat=%s питання=%r", chat_id, query[:120])
 
-    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-
+    typing_task = asyncio.create_task(_keep_typing(context, chat_id))
     try:
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, answer_with_gate, query)
+        result = await loop.run_in_executor(None, route_answer, query)
         answer = result["answer"]
+        log.info("chat=%s конвеєр=%s", chat_id, result.get("pipeline"))
+        if result.get("outcome") not in (None, "ok"):
+            log.warning("chat=%s outcome=%s пошуки=%s", chat_id, result.get("outcome"),
+                       result.get("kb_searches"))
     except Exception:
         log.exception("Помилка обробки питання (chat=%s)", chat_id)
         answer = ("Сталася технічна помилка під час обробки питання. "
                  "Спробуйте, будь ласка, ще раз трохи пізніше.")
+    finally:
+        typing_task.cancel()
 
     for i in range(0, len(answer), TELEGRAM_LIMIT):
         await update.message.reply_text(answer[i:i + TELEGRAM_LIMIT])
